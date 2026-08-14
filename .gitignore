@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.h5
+*.zarr/
+.DS_Store
+.vscode/settings.json
+mlruns/
