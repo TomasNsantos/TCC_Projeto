@@ -7,19 +7,158 @@ estrutural.
 
 ## Fase atual
 Implementação do gerador sintético: Camada 1 (ABM de agentes eleitores,
-via Mesa) e Camada 2 (estrutura de dependência via cópula Clayton,
-biblioteca `copulas`).
+via Mesa), Camada 2 (estrutura de dependência via cópula Clayton, biblioteca
+`copulas`) e o gerador de modo normal/classe negativa
+(`src/generator/normal_mode/`, Poisson homogêneo independente).
 
 ## Convenções
-- Parâmetros populacionais (n_agentes, alpha_beta, prop_racional) são
-  configuráveis, não hardcoded — ainda não fixados definitivamente
-  (pendente de validação com orientadores).
+- Parâmetros populacionais (n_agentes, alpha_beta, prop_racional,
+  prob_conformidade, n_candidatos) são configuráveis, não hardcoded — ainda
+  não fixados definitivamente (pendente de validação com orientadores).
 - Parâmetros do gerador (π, g, Δt, λ, ρ, β) são distintos dos populacionais
   e fazem parte do design fatorial — não confundir os dois grupos.
-- ρ (grau de coordenação) e prop_racional são parâmetros DIFERENTES —
-  não devem ser conflados.
+- ρ (grau de coordenação), prop_racional e prob_conformidade são três eixos
+  de heterogeneidade DIFERENTES — não devem ser conflados: prop_racional
+  rege a decisão de adesão (Fase 1), ρ rege o timing do desembolso (Fase 2),
+  prob_conformidade rege se um agente aderido efetivamente vota como
+  prometido (também Fase 1, mas ortogonal a prop_racional).
 - Testes em `tests/` devem cobrir os Sanity Checks descritos no plano
   (§5.2.3) assim que a Camada 1 estiver funcional.
+- **Mecanismo de conformidade (v0):** `ElectionModel.prob_conformidade` +
+  `VoterAgent.votou_conforme` modelam desistência entre agentes aderidos —
+  cada agente aderido sorteia conformidade uma única vez via
+  Bernoulli(prob_conformidade). Default `1.0` foi escolhido só por
+  retrocompatibilidade (reproduz o comportamento anterior a este parâmetro,
+  sem desistência), não é uma estimativa calibrada do valor real — pendente
+  de validação com orientadores, como os demais parâmetros populacionais
+  desta lista. O desembolso (Fase 2) continua pagando todo agente aderido,
+  independente de conformidade: o oráculo só verifica o resultado agregado
+  R, não pode auditar votos individuais sem violar sigilo do voto.
+- **Decisão de escopo — R é calculado só sobre o pool visado:**
+  `fonte_c_resultado()`/`fonte_c_resultado_agregado()` (proxy de R) usam
+  como denominador `n_agentes` inteiro, não um eleitorado total mais amplo
+  que incluiria não-visados — não há população-base separada no gerador.
+  Decisão deliberada, não pendência esquecida: um CSC (criminal smart
+  contract) é permissionless e autônomo, sem intermediário decidindo quem é
+  alvo — o único filtro de participação é a autosseleção via utilidade do
+  próprio agente (já implementada em `VoterAgent.step()`). Modelar uma
+  segunda população estruturalmente separada reintroduziria implicitamente
+  um avaliador de suscetibilidade, contrariando a própria motivação do CSC
+  de eliminar esse intermediário (ver `docs/adversary_model_draft.tex`,
+  Def. 1/§I-A). Implicação pendente: a normalização de C_min por "tamanho
+  médio do grupo por seção" (PLANO §5.4.4), ao ser operacionalizada nas
+  Semanas 5-6, precisará decidir se "grupo" = n_agentes (tautológico com o
+  pool simulado, como está hoje) ou se essa decisão precisa ser revisitada.
+- **Escolha de candidato (v0):** `VoterAgent.candidato_preferido` (voto de
+  base, sorteado uma vez na criação, categórica uniforme sobre
+  `range(n_candidatos)` — sem preferência ideológica/demográfica, fora de
+  escopo) só é consultado quando `ElectionModel.n_candidatos > 1`; com o
+  default `n_candidatos=1` o voto de base nunca entra no cálculo do
+  resultado (`ElectionModel._voto_e_candidato_alvo`), reproduzindo
+  exatamente o comportamento anterior a esta funcionalidade — retrocompatibilidade
+  estrita, não um valor calibrado. Decisão deliberada: o gerador NÃO
+  implementa alocação de cadeiras (quociente eleitoral, D'Hondt, sobras
+  partidárias) — complexidade desproporcional ao propósito do gerador;
+  `resultado_alvo` é reusado como a fração de votos válidos que o
+  candidato-alvo precisa atingir, o que já permite simular um quociente
+  pequeno de sistema proporcional sem formalizar a regra de alocação. Nota
+  de orientação (não é default de construtor): rodadas futuras explorando o
+  efeito de sistemas proporcionais devem testar `n_candidatos` na faixa de
+  6-10.
+- **Hierarquia de granularidade seção→município→estado (v0):** `município =
+  seção // secoes_por_municipio`, `estado = município // municipios_por_estado`
+  — atribuição determinística (sem sorteio), calculada uma vez na criação
+  dos agentes. Defaults (`secoes_por_municipio=None`→`n_secoes`,
+  `municipios_por_estado=None`→`n_municipios` computado) colapsam tudo num
+  único município e num único estado, retrocompatível com o comportamento
+  anterior a esta hierarquia (só seção existia). `resultado_eleitoral_por_secao/
+  municipio/estado()` compartilham a mesma lógica de voto
+  (`_voto_e_candidato_alvo`); `fonte_c_resultado_agregado()` continua sendo
+  o agregado do pool inteiro, independente da hierarquia — só coincide com
+  `resultado_eleitoral_por_estado()` quando a hierarquia default colapsa tudo
+  num estado só.
+- **Limitação v0 — uma unidade territorial-alvo por vez:**
+  `ElectionModel.resolver_desembolso()` decide ativação checando o resultado
+  de uma única seção/município/estado (`granularidade`/`unidade_alvo`,
+  default `granularidade="pool"` = comportamento anterior, todo o pool). O
+  gerador não modela ataques simultâneos em múltiplas unidades territoriais
+  — fica para trabalho futuro. A granularidade afeta só a condição de
+  ativação: o desembolso (Fase 2) continua pagando todo agente aderido no
+  pool inteiro, independente de `unidade_alvo` — não restringe pagamento à
+  unidade-alvo, para não reabrir a decisão de escopo de R acima.
+- **Gerador de modo normal / classe negativa (v0):**
+  `src/generator/normal_mode/` (`gerar_fonte_a_normal`, `gerar_fonte_b_normal`,
+  `gerar_cenario_normal`) produz a classe negativa dos datasets de detecção
+  (PLANO §5.2.4) — Fonte A/B como processos de Poisson homogêneos
+  independentes (fluxos de RNG separados, sem cópula, sem superposição de
+  múltiplos tipos de contrato — decisão v0 deliberada) e Fonte C de uma
+  `ElectionModel` real com `recompensa=0` (eleição de fato acontece, só sem
+  CSC por trás). **Pendência explícita:** `taxa`/`volume_medio` de Fonte A/B
+  não têm valor calibrado e não têm default nas funções — a ordem de
+  grandeza correta só pode ser decidida depois que os níveis de λ
+  (baixa/média/alta) do design fatorial tiverem valores numéricos no
+  gerador, o que ainda não aconteceu. Não adivinhar um valor "razoável"
+  antes disso — risco explícito do PLANO §5.2.4 é o detector aprender a
+  separar as classes só pelo volume total se a ordem de grandeza for
+  escolhida sem cuidado.
+- **Sanity Check 1 (vazio) ≠ modo normal (tráfego de fundo) — dois cenários
+  de teste diferentes, um não substitui o outro:** Sanity Check 1
+  (`test_sanity_check_1_lambda_zero_nao_gera_sinal_espurio`) testa o caso
+  degenerado "nada acontece" (`recompensa=0`, sem CSC ativo nem tráfego de
+  fundo — Fonte A/B ficam vazias por construção). O gerador de modo normal
+  (`gerar_cenario_normal`) testa o caso realista "há tráfego de fundo
+  plausível e eleição de verdade, só não há CSC" — por isso exige
+  `n_candidatos > 1` (ver `_voto_e_candidato_alvo`): com `n_candidatos=1` e
+  `recompensa=0`, o resultado por seção degenera para exatamente zero em
+  todo lugar, reproduzindo o cenário do Sanity Check 1 em vez do cenário
+  realista que esta função existe para gerar.
+- **Pendência metodológica — duas formas de medir τ_Kendall(A,B), ainda não
+  unificadas:** `test_modo_normal_produz_independencia`
+  (`tests/test_layer2_copula.py`) calcula τ_Kendall por pareamento direto dos
+  timestamps brutos — só funciona porque a cópula Clayton gera Fonte B
+  pareada 1:1 com Fonte A por construção. O gerador de modo normal
+  (`src/generator/normal_mode/trafego.py::contagem_por_timestep`) usa
+  binning por janela deslizante, porque Fonte A/B independentes têm
+  contagens de eventos diferentes, sem pareamento natural. As duas
+  abordagens medem grandezas relacionadas mas não idênticas. Quando a
+  Camada 3 de feature engineering for implementada (Semanas 9-10, PLANO
+  §5.3.1 — "τ_Kendall(A,B) estimado por janela deslizante"), será preciso
+  escolher UM método canônico que funcione igual para classe positiva e
+  negativa; o pareamento direto que a Sanity Check 4 usa hoje é um artefato
+  conveniente da geração sintética acoplada, não necessariamente
+  representativo de como o feature será calculado sobre dados observados
+  quaisquer. Pendência registrada, não resolvida agora.
+- **Fragmentação β integrada à Fase 2:** `ElectionModel.beta` (parâmetro do
+  design fatorial, categoria de `delta_t`/`rho` — não populacional; default
+  `1`) conecta `layer2_copula.aplicar_batching` a `resolver_desembolso()`.
+  Cada evento de desembolso é fragmentado em β sub-eventos, cada um levando
+  `recompensa/beta` em `fonte_a_eventos_fronteira()` (o total pago por
+  agente não muda com a fragmentação, só a distribuição temporal e a
+  granularidade da contagem). β=1 é retrocompatibilidade estrita:
+  `aplicar_batching` é no-op exato nesse caso (nem consome números
+  aleatórios). Isso destrava gerar Fonte A com β>1 a partir do fluxo real do
+  modelo — pré-requisito do Sanity Check 3 (§5.2.3, degradação monotônica do
+  F1 conforme β aumenta), que continua não implementado (depende do
+  detector, que ainda não existe).
+- **Sanity Check 2 (ρ=1.0, λ máximo) — limite conhecido, caracterizado por
+  teste, não corrigido:** τ_Kendall(A,B) não atinge o limiar de 0.4 do PLANO
+  nessa configuração (τ empírico ≈ 0.134 com os parâmetros do notebook
+  `validacao_visual_desistencia.ipynb`, células 9-13). Causa: ρ=1.0 colapsa
+  o desvio-padrão de Fonte A para perto de
+  `_SIGMA_FRACAO_DELTA_T * delta_t` (≈4, contra ≈57 em ρ=0), e τ_Kendall,
+  estatística de postos, perde poder discriminativo quando uma das
+  variáveis tem variância própria muito pequena — mesmo com o θ interno da
+  cópula pedindo dependência forte. Agora coberto por
+  `test_sanity_check_2_rho_alto_caracteriza_limite_conhecido` e
+  `test_tau_kendall_cai_monotonicamente_conforme_rho_aumenta`
+  (`tests/test_integration.py`) — guardas de regressão do comportamento
+  *conhecido*, não validação de que o Sanity Check 2 "passa". Não alterar
+  `_SIGMA_FRACAO_DELTA_T`/`_amostrar_timestamps_desembolso` para forçar esse
+  teste a "passar" sem validação com os orientadores. Pendência em aberto,
+  não resolvida por esses testes: reformular o critério do Sanity Check 2 em
+  termos de F1 do detector completo (§5.2.3) ou de features de amplitude de
+  pico/entropia (§5.3.1), já que ambos dependem do pipeline de detecção
+  ainda não implementado.
 
 ## Estilo
 - Código Python com type hints

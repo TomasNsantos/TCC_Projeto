@@ -1,0 +1,617 @@
+%% adversary_model_draft.tex
+%% Rascunho de trabalho — Adversary Model (§5.1.1 do Plano V4.1)
+%% Baseado em IEEEtran.cls (bare_jrnl.tex, Michael Shell)
+%% Uso: rascunho de conteúdo para revisão do co-orientador.
+%% NÃO é o template final de submissão (S&P/ICBC/USENIX) — trocar antes de submeter.
+
+\documentclass[journal,onecolumn,11pt]{IEEEtran}
+
+% --- Matemática (necessário para as definições formais do adversário) ---
+\usepackage{amsmath}
+\usepackage{amssymb}
+\interdisplaylinepenalty=2500
+
+% --- Citações ---
+\usepackage{cite}
+
+% --- Ambiente simples para blocos de definição formal (estilo Juels et al. / Bet and Attack) ---
+\usepackage{amsthm}
+\newtheorem{remark}{Remark}
+\newtheorem{definition}{Definition}
+\newtheorem{property}{Property}
+
+% correção de hifenização (deixe como está, inofensivo)
+\hyphenation{op-tical net-works semi-conduc-tor}
+
+\begin{document}
+
+% =====================================================================
+% TÍTULO — provisório, ajustar depois
+% =====================================================================
+\title{Adversary Model for Economic Incentive-Based Vote-Buying \\
+via Smart Contracts under Native Privacy \\
+\large Working Draft --- Adversary Model Section (v0)}
+
+% --- Autoria omitida propositalmente neste rascunho de trabalho ---
+% (evitar inserir nomes/afiliação até definir o template de submissão double-blind)
+\author{Tomás Nascimento Santos}
+\maketitle
+
+\begin{abstract}
+This working draft specifies the formal adversary model for the election
+vote-buying scenario introduced in [Plano TCC V4.1]. It defines the
+adversary $\mathcal{A}$, its budget and utility function, the resolution
+of the classical commitment problem via conditional smart contract
+execution, the privacy guarantees of the underlying architecture,
+the adversary's evasion strategies (transaction batching), and the
+target security properties of the detector. This is a v0 draft intended
+for structural feedback, not a submission-ready section.
+\end{abstract}
+
+\begin{IEEEkeywords}
+adversary model, smart contracts, vote-buying, commitment problem,
+native privacy, blockchain, criminal smart contracts
+\end{IEEEkeywords}
+
+% =====================================================================
+% NOTA DE ESCOPO — remover antes da versão final, manter para o co-orientador
+% =====================================================================
+\textit{Scope note (remove before final version): this draft follows a
+definitions-plus-properties level of formalism (as in Juels et al. 2016),
+not a full game-theoretic equilibrium proof (as in Motaqy et al. 2021).
+Full equilibrium proofs are deferred to future work / appendix, pending
+advisor confirmation.}
+
+\bigskip
+\hrule
+\bigskip
+
+% =====================================================================
+% 1. ADVERSARY DEFINITION
+% =====================================================================
+\section{Adversary Definition}
+\label{sec:adversary}
+
+Juels et al.~\cite{juels2016ring} introduce the notion of a \emph{criminal
+smart contract} (CSC): a smart contract whose purpose is to facilitate a
+crime by algorithmically guaranteeing that payment and the criminal act
+occur jointly, removing the need for bilateral trust between perpetrator
+and principal. Their original constructions target crimes committed by a
+single perpetrator against a single, identifiable victim or target ---
+leakage of a secret, theft of a private key, a calling-card crime
+authenticated by an external data feed. The adversary $\mathcal{A}$
+modeled in this work instantiates the same underlying primitive, but at a
+different scale and structure: rather than commissioning a single,
+discrete criminal act, $\mathcal{A}$ conditions payment on a
+mass-participation, population-level electoral outcome, coordinating an
+unbounded number of pseudonymous, mutually unacquainted voters toward a
+common result. This extension --- from individually attributable crime
+to aggregate, crowd-scale coordination --- is what necessitates the
+specific formal treatment developed below.
+
+\begin{definition}[Adversary $\mathcal{A}$]
+\label{def:adversary}
+The adversary $\mathcal{A}$ is a rational, budget-constrained party seeking to
+influence the aggregate outcome of an election, or of a targeted electoral
+segment of granularity $g$ (e.g., precinct, municipality), by conditioning
+monetary payment on that outcome through a smart contract deployed on a
+native-privacy blockchain. $\mathcal{A}$ does not seek to verify, coerce, or
+observe any individual voter's ballot; $\mathcal{A}$'s objective is defined
+entirely over the publicly reported aggregate result $R$.
+
+\end{definition}
+
+\subsection{Budget and Utility Function}
+\label{subsec:budget-utility}
+
+$\mathcal{A}$ operates under a finite budget $B$, allocated across a pool of
+participating voters as a per-participant reward, subject to the constraint
+that total disbursement cannot exceed $B$. $\mathcal{A}$'s utility from a
+given strategy is, at this stage of the draft, characterized only
+qualitatively as a function of three components: the value $\mathcal{A}$
+assigns to achieving outcome $R$, the total cost of incentivizing enough of
+the target population to bring about $R$, and any additional cost incurred by
+evasion strategies (Section~\ref{sec:evasion}) intended to reduce
+$\mathcal{A}$'s exposure to a detector. Formally:
+\[
+U(\mathcal{A}) \;=\; V(R) \cdot \Pr[R \mid \text{strategy}] \;-\; \text{Cost}_B(\text{strategy}) \;-\; \text{Cost}_{\text{evasion}}(\text{strategy})
+\]
+where $V(R)$ denotes $\mathcal{A}$'s valuation of the desired outcome, and the
+two cost terms are, for the purposes of this draft, left unspecified pending
+the operationalization of $C_{\min}(\pi, \lambda, g, \beta)$ planned for Weeks 5--6 of the accompanying schedule. Motaqy et al.~\cite{motaqy2021bet} provide a
+directly analogous formalization for coordinated attacks, in which each
+participant's reward depends on a private type $t_i = \text{bet}_i / \omega_S$
+and the aggregate outcome, under a mechanism proven to be incentive-compatible
+and budget-balanced; the present formulation adapts this structure to the
+electoral setting but does not yet commit to a specific functional form for
+$V(R)$ or the cost terms.
+
+\subsection{Adversary Capabilities and Limitations}
+\label{subsec:capabilities}
+
+$\mathcal{A}$ is assumed capable of:
+\begin{itemize}
+  \item deploying a smart contract on the target blockchain that conditions
+        payment on an oracle-reported aggregate result $R$;
+  \item interacting with one or more oracles capable of reporting the
+        finalized, officially published electoral result at granularity $g$;
+  \item distributing payment to a pool of pseudonymous participants upon
+        contract execution;
+  \item fragmenting disbursement across multiple transactions or pseudonymous
+        accounts (batching, parameterized by $\beta$), as an evasion strategy
+        against a detector (Section~\ref{sec:evasion}).
+\end{itemize}
+\vspace{\baselineskip}
+$\mathcal{A}$ is explicitly \emph{NOT} assumed capable of:
+\begin{itemize}
+  \item observing, inferring, or verifying any individual voter's ballot,
+        consistent with the architectural guarantee of ballot secrecy;
+  \item compelling any individual voter's compliance --- $\mathcal{A}$'s
+        mechanism conditions payment on the \emph{aggregate} outcome, and does
+        not, by itself, guarantee that any single paid participant votes as
+        intended. This is a known limitation of the mechanism, not an
+        oversight: Guerra and Justesen~\cite{guerra2022votebuying}
+        document experimentally, in an unconditional pre-blockchain payment
+        scheme, that compliance is imperfect even under strong incentives;
+        Finan and Schechter~\cite{finan2011votebuying} and
+        Kaba~\cite{kaba2022votebuying} further show that both who is
+        targeted and how targets respond vary systematically across voter
+        types (reciprocity-based targeting, and opposition
+        abstention-buying vs.\ incumbent turnout-buying, respectively). We
+        return to this point when discussing the limits of the adversary's
+        utility function above.
+\end{itemize}
+
+
+\bigskip
+\hrule
+\bigskip
+
+% =====================================================================
+% 2. COMMITMENT PROBLEM RESOLUTION
+% =====================================================================
+\section{Resolution of the Commitment Problem}
+\label{sec:commitment-problem}
+Traditional vote-buying suffers from a fundamental credibility failure known as the
+\emph{commitment problem}: a vote-buyer who pays a voter in advance has no
+enforcement mechanism to guarantee that the voter casts the agreed-upon ballot, since
+ballot secrecy makes individual votes unverifiable by design. Conversely, a vote-buyer
+who defers payment until after the election gives the vote-seller no guarantee that payment
+will actually be made, and a rational voter anticipating this risk has no incentive to
+comply. This bilateral lack of enforceability is what causes classical vote-buying
+schemes to unravel under standard rational-choice assumptions~\cite{finan2011votebuying}, a constraint that pre-blockchain vote-buying
+arrangements circumvent only imperfectly through local intermediaries able to informally
+predict voter behavior.
+
+Smart contracts operating on a public ledger resolve this problem by replacing
+bilateral trust with a self-executing, third-party-free enforcement mechanism.
+Juels et al.~\cite{juels2016ring} formalize this class of construction as
+\emph{criminal smart contracts} (CSCs) and introduce the security property of
+\emph{commission-fairness}: a contract execution guarantees that commission of the
+underlying act and commensurate payment to the perpetrator occur together, or that
+neither occurs. Although Juels et al. develop this property for crimes such as
+leakage of secrets, key theft, and calling-card crimes verified through authenticated
+data feeds, the same structural pattern transfers directly to the election
+vote-buying setting: rather than committing to a single, individually verifiable act,
+the adversary conditions payment on an \emph{aggregate}, externally verifiable
+electoral outcome.
+
+Formally, the adversary $\mathcal{A}$ deploys a smart contract that, upon
+notification from an oracle reporting the finalized aggregate result $R$ of the
+election (or of a targeted electoral segment), releases payment to a pool of
+participating voters:
+\begin{quote}
+\texttt{if oracle.result == R: transfer(pool, reward\_per\_voter)}
+\end{quote}
+This construction removes the voter-side risk of non-payment, since disbursement is
+enforced by contract code rather than by the adversary's discretion, and removes the
+adversary-side risk of non-compliance in aggregate, since payment is conditioned on
+an outcome that reflects the collective behavior of the target population rather
+than on any single, unverifiable individual vote. Motaqy et al.~\cite{motaqy2021bet}
+formalize an analogous oracle-conditioned reward mechanism for coordinated attacks
+among mutually distrustful, pseudonymous participants, and prove that the resulting
+game admits a strongly dominant equilibrium strategy and is incentive-compatible:
+participants have no incentive to deviate from contributing in proportion to their
+committed stake, and — critically for Section~\ref{sec:evasion} — no incentive
+to fragment a single contribution across multiple transactions, since the
+oracle-reported aggregate outcome and the resulting reward depend only on the sum of
+contributions, not on how that sum is partitioned across transactions or
+pseudonymous accounts.
+
+A key disanalogy with the CSC literature is worth making explicit. In Juels
+et al.'s calling-card constructions, the event being verified is the commission of a
+discrete act by a single, identifiable perpetrator; in the present setting, the
+verified event is an aggregate statistic emerging from the uncoordinated behavior of
+a potentially large population of voters, none of whom individually needs to be
+identified or to prove their own compliance. This substitution of a population-level sufficient statistic for an
+individually attributable act is what allows the payment condition to
+remain enforceable without ever breaching ballot secrecy: neither $\mathcal{A}$ nor the oracle needs to observe, infer, or be convinced of any single voter's choice, because the event being verified is not an individual ballot at all, but the finalized, officially published aggregate result $R$ --- a fact that is public by construction,
+independently of any smart contract. Ballot secrecy is therefore never at stake;
+what the smart contract removes is not a barrier of observability but a barrier
+of \emph{enforceability}, by conditioning payment on a fact that was already
+observable to everyone.
+
+\begin{remark}[Scope: single-outcome vs.\ multi-contract compliance signaling]
+\label{rem:scope-single-outcome}
+The construction above conditions payment on a single aggregate event $R$ (the
+outcome for one office or contest). A more elaborate design is possible in
+electoral systems where voters cast multiple, simultaneously observable votes
+in the same ballot --- e.g., open-list elections with several concurrent
+offices, as in Brazilian federal general elections, where a voter selects
+candidates for multiple positions at once. In such systems, $\mathcal{A}$
+could deploy a \emph{multi-variant} contract in which each enrolled voter is
+assigned to one of $N$ sub-contracts, each conditioning payment on both the
+main outcome (e.g., a minimum vote count for the targeted candidate) and a
+distinct, low-popularity ``signature'' vote for a minor down-ballot candidate
+aligned with $\mathcal{A}$. Because the signature candidate is chosen
+specifically for negligible organic support in the target precinct, a
+signature vote materializing in the precinct-level tally functions as a
+probabilistic proxy for individual turnout and compliance, without violating
+ballot secrecy at the level of any single voter. This would tighten the
+commitment problem further: a voter who accepts payment but abstains, or who
+free-rides on other participants' turnout, is more likely to be excluded from
+disbursement, since their assigned signature vote would not materialize.
+
+We deliberately exclude this construction from the present model, for two
+reasons. First, it presupposes a specific class of electoral system (open-list
+or multi-office ballots, or write-in voting) and is not applicable to
+single-office or closed-list elections, undermining the generality that this
+work aims to preserve across electoral contexts. Second, partitioning the
+target population across $N$ sub-contracts multiplies the number of
+distinct conditional payment paths the adversary must instantiate and fund,
+up to a regime approaching one contract per voter, which substantially
+increases both deployment cost and on-chain footprint --- eroding the
+financial viability of the scheme, and, incidentally, increasing its
+detectable surface area under the observability model of
+Section~\ref{sec:privacy}. 
+
+We note, however, that this construction is directly motivated by a real
+limitation of the single-outcome mechanism formalized above: conditioning
+payment purely on an aggregate result does not, by itself, prevent
+desertion or free-riding among paid participants, a vulnerability that
+Wang et al.~\cite{wang2019randomness} demonstrate can severely undermine the
+practical success rate of an otherwise sound criminal smart contract even
+when the underlying protocol is provably correct. The multi-contract,
+signature-vote design sketched above is one possible mitigation of exactly
+this vulnerability, and we defer its formalization --- together with a
+quantitative comparison of its cost and detectability trade-offs against the
+single-outcome baseline --- to future work.
+\end{remark}
+
+
+\bigskip
+\hrule
+\bigskip
+
+% =====================================================================
+% 3. PRIVACY GUARANTEES (π)
+% =====================================================================
+\section{Privacy Guarantees of the Underlying Architecture}
+\label{sec:privacy}
+
+The mechanism described in Section~\ref{sec:commitment-problem} presupposes an
+underlying blockchain architecture capable of shielding the internal details of
+the adversary's contract --- participant identities, individual reward amounts,
+and the contract's internal logic --- from external observation. This section
+specifies formally what such an architecture guarantees, and, just as
+importantly, what it does not.
+
+
+
+
+
+\begin{property}[Privacy level]
+\label{prop:privacy-level}
+Let $\pi \in [0,1]$ denote the fraction of the adversary's internal contract
+state and transactional detail that is inaccessible to an external observer.
+At $\pi = 0$ (a fully transparent public ledger, e.g., Bitcoin or unshielded
+Ethereum), all transaction data --- sender and recipient identities, transferred
+values, and contract call arguments --- is directly observable. As
+$\pi \to 1$, only \emph{boundary events} and \emph{oracle interactions} remain
+observable: the timestamp and aggregate volume of transfers crossing between a
+privacy-preserving execution layer and a public settlement layer, and the
+timestamp of a contract's interaction with an oracle, without access to the
+content of either.
+
+\end{property}
+
+Privacy, in this sense, is not a binary property of a blockchain but a
+composite of several independent guarantees. Bernabe et
+al.~\cite{bernabe2019privacy} identify at least four largely orthogonal
+dimensions along which a blockchain system may or may not preserve privacy:
+smart-contract-level confidentiality (including key management), identity
+anonymization, transaction-data anonymization, and on-chain data protection;
+no system in their survey achieves all four simultaneously. Within the
+transaction-anonymization dimension specifically, Obeid et
+al.~\cite{obeid2025comparative} distinguish two properties that are useful to
+disambiguate precisely which guarantee is at stake at any given point in this
+work: \emph{untraceability}, the inability to determine the sender of a
+transaction among a set of possible senders, and \emph{unlinkability}, the
+inability to determine that two transactions share a common recipient. $\pi$,
+as used throughout this work, is therefore best understood not as a single
+scalar but as a shorthand for the joint degree to which these dimensions are
+simultaneously satisfied by the adversary's chosen execution environment;
+where the distinction between untraceability and unlinkability matters for a
+specific claim, we invoke it explicitly rather than relying on $\pi$ alone.
+
+This composite characterization is not merely conceptual. Moradi et
+al.~\cite{moradi2025privacy} operationalize an analogous privacy parameter as
+a continuous function of the fraction of relay infrastructure an adversary
+(in their setting, a privacy \emph{defender}'s adversary) has compromised,
+showing formally that de-anonymization probability increases smoothly, not
+discretely, with the extent of compromise. This supports treating $\pi$ as a
+continuous variable governed by the robustness of the underlying
+infrastructure, rather than as a property that a system either has or lacks.
+
+Architectures satisfying $\pi \to 1$ for the purposes of this work are not
+hypothetical: Obeid et al.~\cite{obeid2025comparative} document several
+blockchains that combine strong transactional privacy with Turing-complete
+programmability --- notably Aleo, via a zero-knowledge virtual machine, and
+Aztec, via zk-rollups over Ethereum --- confirming that a vote-buying contract
+of the kind described in Section~\ref{sec:commitment-problem} is
+technologically realizable today, and not merely a theoretical construction.
+
+
+\subsection{What Remains Observable Even as $\pi \to 1$}
+\label{subsec:residual-observability}
+
+A privacy guarantee of $\pi \to 1$ does not entail that the adversary's
+contract becomes entirely invisible. Steffen et al.~\cite{steffen2022zapper},
+in the context of Zapper --- a smart contract system that hides both user
+identity and the specific objects accessed by a transaction --- prove that
+even under their strongest privacy guarantees, an external observer still
+learns that \emph{some} contract function was called and that its execution
+conditions were satisfied, without learning by whom. This is a formal, architecture-level confirmation that oracle
+interactions of the kind our adversary's contract depends on
+(Section~\ref{sec:commitment-problem}) are not eliminated by privacy-preserving
+execution; only their content is.
+
+This residual observability is corroborated empirically, not merely in
+principle. Valadares et al.~\cite{valadares2023privacy}, in a comparative
+technical analysis of seven native-privacy platforms, five of which are based on TEE (Trusted Execution Environments), find that in every TEE-based platform surveyed, the bridge between the confidential execution layer and the
+public settlement layer, along with the timestamp of contract activation,
+necessarily remains public — a structural requirement for consensus and
+data-availability verification, not an implementation oversight. Together,
+these two results justify treating boundary events and oracle interactions as
+the residual observable surface available to a detector under $\pi \to 1$,
+independently of which specific native-privacy architecture the adversary
+chooses to deploy on.
+
+
+\bigskip
+\hrule
+\bigskip
+
+% =====================================================================
+% 4. EVASION STRATEGIES (BATCHING / β)
+% =====================================================================
+\section{Adversary Evasion Strategies: Transaction Batching}
+\label{sec:evasion}
+
+Section~\ref{sec:privacy} established that boundary events (Fonte A) remain
+observable even as $\pi \to 1$: the timestamp and aggregate volume of transfers
+crossing between the privacy-preserving execution layer and the public
+settlement layer cannot be eliminated by the underlying architecture. This
+section characterizes the adversary's principal strategy for reducing the
+usefulness of that residual signal to a detector: fragmenting disbursement
+across multiple transactions, a strategy we parameterize by $\beta$ , with $\beta \in \{1, 5, 20\}$.
+
+\subsection{The Batching Mechanism}
+\label{subsec:batching-mechanism}
+
+Rather than disbursing the entire reward pool to participating voters in a
+single transaction (or a small number of large transactions), the adversary
+$\mathcal{A}$ may split disbursement into $\beta$ smaller transactions,
+distributed across time and/or across pseudonymous intermediary accounts.
+Under the observability model of Section~\ref{sec:privacy}, this fragmentation
+reduces the amplitude of the volume spike observable at the boundary layer by
+a factor of approximately $1/\beta$ for a fixed total disbursement, since the
+same aggregate value is now spread across $\beta$ discrete boundary-crossing
+events rather than concentrated in one. 
+
+\begin{property}[Batching as detection evasion]
+\label{prop:batching-evasion}
+For a fixed total reward disbursement $V$, splitting disbursement into
+$\beta$ transactions reduces the peak observable amplitude at Fonte A by a
+factor of approximately $1/\beta$, at the cost of $\beta$ additional
+boundary-crossing events and $\beta$ times the marginal transaction (gas) cost.
+\end{property}
+
+\subsection{Evasion Is Not a Utility-Maximizing Strategy Under the Reward Mechanism}
+\label{subsec:evasion-not-utility}
+
+A crucial distinction must be drawn here, one that is easy to conflate but
+structurally important: batching reduces the adversary's \emph{exposure to a
+detector}, but it does not, by itself, change the adversary's \emph{financial
+utility} under the reward mechanism of Section~\ref{sec:commitment-problem}.
+Motaqy et al.~\cite{motaqy2021bet} prove formally (Theorem 2, by
+contradiction) that, under an oracle-conditioned reward mechanism structurally
+identical to the one this work adopts, fragmenting a single contribution
+across multiple transactions or pseudonymous accounts does not increase a
+participant's payoff, because both the oracle-reported aggregate outcome and
+the resulting reward depend only on the sum of contributions, not on how that
+sum is partitioned. This result transfers directly to the present setting:
+$\mathcal{A}$'s payoff depends on the aggregate electoral outcome $R$ and on
+total disbursement, neither of which is affected by how disbursement is
+split into transactions.
+
+The consequence is that batching in this model must be understood as a
+strategy adopted \emph{exclusively} for detection evasion, at a strictly
+positive marginal cost, rather than as a strategy that improves
+$\mathcal{A}$'s expected reward. This distinction matters for the security
+properties of the detector (Section~\ref{sec:detector-properties}): a rational
+adversary will batch only up to the point where the marginal reduction in
+detection probability justifies the marginal transaction cost, not
+indefinitely, since further fragmentation carries no offsetting financial
+benefit.
+
+\subsection{The Cost of Evasion}
+\label{subsec:evasion-cost}
+
+Batching is not costless. Each additional transaction incurs a marginal gas
+cost, and, in zero-knowledge architectures specifically, this cost does not
+scale favorably with the number of fragments. Williamson~\cite{aztec2018protocol},
+in the AZTEC protocol specification, reports concrete gas costs for
+range-proof verification of confidential transactions on Ethereum: prior to
+the EIP-1108 precompile optimization, verifying $n$ outputs and $m$ inputs
+costs approximately $121{,}000n + 41{,}000m + 219{,}000$ gas, falling to
+approximately $12{,}200n + 6{,}200m + 85{,}930$ gas post-EIP-1108. Critically,
+AZTEC's own batching optimization operates in the \emph{opposite} direction
+from $\mathcal{A}$'s: it allows a \emph{verifier} to aggregate multiple range
+proofs into a single pairing check, reducing marginal cost per note, whereas
+$\mathcal{A}$ deliberately \emph{avoids} such aggregation, fragmenting
+disbursement into many small, separately verified transactions specifically
+to avoid the aggregate footprint that verifier-side batching would otherwise
+produce. This asymmetry is worth noting explicitly: the same primitive
+(transaction aggregation) that a privacy-preserving protocol uses to reduce
+cost is, from $\mathcal{A}$'s perspective, something to avoid, since
+aggregation is precisely what would make disbursement visible as a single
+large event at Fonte A.
+
+We adopt this cost structure as the empirical basis for the marginal cost
+term in the eventual formulation of $C_{\min}(\pi, \lambda, g, \beta)$,
+approximating the adversary's total evasion cost as
+$C_{\text{evasion}} = \beta \cdot c_{\text{gas}}$, where $c_{\text{gas}}$ is
+grounded in the per-transaction costs reported above rather than assumed
+arbitrarily.
+
+\bigskip
+\hrule
+\bigskip
+
+% =====================================================================
+% 5. TARGET SECURITY PROPERTIES OF THE DETECTOR
+% =====================================================================
+\section{Target Security Properties of the Detector}
+\label{sec:detector-properties}
+
+Given the observable surfaces defined in Section~\ref{sec:privacy} and the
+evasion strategy characterized in Section~\ref{sec:evasion}, we state the
+target security property the detector $D$ developed in this work is designed
+to satisfy.
+
+\begin{property}[Detector guarantee]
+\label{prop:detector-guarantee}
+A detector $D$ provides detection with probability at least $\delta$ given
+adversarial behavior of intensity $\lambda > \lambda^*(\pi)$, at a
+false-positive rate no greater than $\alpha$ under normal (non-adversarial)
+behavior, where $\lambda^*(\pi)$ denotes the minimum adversarial intensity
+above which detection above chance level is achievable at privacy level
+$\pi$.
+\end{property}
+
+Unlike the constructions in Sections~\ref{sec:commitment-problem}
+and~\ref{sec:evasion}, this is an empirical target rather than a
+cryptographic or game-theoretic guarantee: $\delta$, $\alpha$, and
+$\lambda^*(\pi)$ are quantities to be characterized experimentally, not
+derived analytically. The function $\lambda^*(\pi)$ --- the
+\emph{detectability frontier} --- is the central empirical object this work
+aims to characterize; its full specification and the experimental protocol
+used to estimate it are given in the corresponding methodology section of
+the accompanying plan.
+
+
+\bigskip
+\hrule
+\bigskip
+
+% =====================================================================
+% ESCOPO DECLARADO / LIMITAÇÕES (checklist da conversa anterior)
+% =====================================================================
+\section*{Declared Scope and Limitations (Draft Note)}
+\addcontentsline{toc}{section}{Declared Scope and Limitations (Draft Note)}
+
+This note consolidates scope decisions and open items flagged throughout the
+draft. It is intended for co-advisor review and will be removed or
+integrated into the main text in later revisions.
+
+\begin{itemize}
+
+  \item \textbf{Level of formalism.} As stated in the scope note preceding
+        Section~\ref{sec:adversary}, this draft follows a
+        definitions-plus-properties level of formalism, consistent with
+        Juels et al.~\cite{juels2016ring}, rather than a full game-theoretic
+        equilibrium proof, as in Motaqy et al.~\cite{motaqy2021bet}. Whether
+        a full equilibrium proof is required for the target venues remains
+        pending advisor confirmation.
+
+  \item \textbf{Single-aggregate-outcome scope.} As discussed in
+        Remark~\ref{rem:scope-single-outcome}, the adversary model is
+        deliberately restricted to smart contracts conditioning payment on a
+        single aggregate electoral outcome $R$. Multi-contract,
+        ``compliance-signature'' constructions applicable to open-list or
+        multi-office ballots are excluded by design, in favor of generality
+        across electoral systems, and are deferred to future work.
+
+  \item \textbf{Utility function left qualitative.} The adversary's utility
+        function $U(\mathcal{A})$ (Section~\ref{subsec:budget-utility}) is
+        stated in qualitative form; its cost terms depend on the
+        operationalization of $C_{\min}(\pi, \lambda, g, \beta)$, planned for
+        Weeks 5--6 of the accompanying schedule. No specific functional form
+        for $V(R)$ or the cost terms is committed to in this draft.
+
+  \item \textbf{Voter compliance heterogeneity is empirical, not
+analytical.} Section I-B notes, following Guerra and
+Justesen~\cite{guerra2022votebuying}, that individual voter compliance
+under incentive is empirically imperfect; Finan and
+Schechter~\cite{finan2011votebuying} and Kaba~\cite{kaba2022votebuying}
+further show that both targeting and response to incentive vary
+systematically across voter types. Wang et al.~\cite{wang2019randomness}
+show that this kind of desertion/free-riding can undermine the practical
+success rate of an otherwise provably correct criminal smart contract. This draft does
+not formalize the fraction of participants who effectively coordinate as
+part of the adversary model itself. Instead, per the accompanying plan
+(\S5.2.2), it is characterized empirically through the synthetic data
+generator via two distinct parameters: $\rho \in \{0.0, 0.5, 1.0\}$
+(\emph{grau de coordenação}), which is part of the main factorial design
+and thus systematically varied across experiments, and
+\texttt{prop\_racional} $\in \{0.7, 0.9, 1.0\}$, an agent-based population
+parameter fixed by advisor consensus (Weeks 5--6) with sensitivity
+analysis limited to \texttt{n\_agentes}. Whether either of these should
+additionally be reflected as an explicit term in the adversary's utility
+function $U(\mathcal{A})$ (Section~\ref{subsec:budget-utility}), rather
+than left entirely to the generator, remains an open decision pending
+advisor input.
+
+  \item \textbf{Detector properties are empirical targets, not proofs.} As
+        stated in Section~\ref{sec:detector-properties}, $\delta$, $\alpha$,
+        and $\lambda^*(\pi)$ (Property~\ref{prop:detector-guarantee}) are
+        quantities to be characterized experimentally against synthetic
+        data, not derived analytically. No numerical target values are
+        committed to in this draft.
+
+  \item \textbf{``Open Challenge 2'' is interpretive nomenclature.} This
+        draft, following the accompanying plan, refers to the problem
+        addressed here as a response to ``Open Challenge 2'' of
+        Shevchuk et al.~\cite{shevchuk2025anomaly}. The source survey does
+        not itself use OC1/OC2 labels; this numbering reflects this work's
+        own positional reading of the challenges listed in that survey's
+        \S4.4, and must be verified against target-venue citation
+        conventions before submission.
+
+\item \textbf{Monolithic adversary.} $\mathcal{A}$ is modeled throughout this
+draft as a single, unified strategic actor --- one budget $B$, one
+deployed contract, one batching decision $\beta$ --- rather than as a
+population of independent, mutually unacquainted operators, as in the
+multi-participant setting of Motaqy et al.~\cite{motaqy2021bet}. This is
+consistent with, and required by, the generator architecture described
+in the accompanying plan (\S5.2.2): the agent-based layer introduces
+heterogeneity on the \emph{voter} side (propensity, rationality), not on
+the adversary side. We treat this as a structural scope decision, not an
+oversight: modeling $\mathcal{A}$ as multiple independent operators would
+require a separate coordination game among adversarial sub-agents, which
+is out of scope for this work.
+
+
+
+\end{itemize}
+
+
+% =====================================================================
+% REFERÊNCIAS — apontar para o seu .bib já populado
+% =====================================================================
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+
+\end{document}
