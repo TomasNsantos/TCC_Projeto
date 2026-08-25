@@ -140,6 +140,35 @@ via Mesa), Camada 2 (estrutura de dependência via cópula Clayton, biblioteca
   modelo — pré-requisito do Sanity Check 3 (§5.2.3, degradação monotônica do
   F1 conforme β aumenta), que continua não implementado (depende do
   detector, que ainda não existe).
+- **Redução de amplitude por β não é monotônica — achado documentado, não
+  corrigido:** o pico de volume de Fonte A NÃO cai monotonicamente conforme
+  β aumenta — cai abruptamente de β=1 para β=2, depois volta a subir
+  gradualmente até β=20 (formato de V), com os parâmetros do notebook
+  `validacao_visual_batching_granularidade_visao_geral.ipynb` (seção 1,
+  células 2-7): pico=1040.0 em β=1, mínimo de 180.0 em β=2, subindo de novo
+  até 898.5 em β=20 — quase de volta ao nível de β=1. Causa: a janela de
+  fragmentação usada por `aplicar_batching` é `delta_t/beta` — ENCOLHE
+  conforme β cresce, ao contrário da intuição "mais fragmentos = mais
+  dispersão". Em β baixo, o salto de "nenhuma dispersão" (β=1) para uma
+  janela de tamanho `delta_t/2` (β=2) é abrupto e dispersa bastante; em β
+  alto, a janela fica tão estreita que os sub-eventos fragmentados voltam a
+  se reconcentrar perto do timestamp original, revertendo parte do efeito
+  de evasão. Não é um bug de implementação — `aplicar_batching` faz
+  exatamente o que `copula.py` documenta e o que `tests/test_layer2_copula.py`
+  verifica; é a fórmula `delta_t/beta` para a janela em si que é uma
+  suposição v0 nunca validada com os orientadores, decisão de modelagem, não
+  erro de código. **Implicação pendente, não decidida aqui:** a expectativa
+  do Sanity Check 3 (§5.2.3, degradação monotônica do F1 conforme β aumenta)
+  pode não se sustentar se o detector usar amplitude de pico como sinal
+  principal, já que essa amplitude em si não é monotônica em β. Duas saídas
+  possíveis, nenhuma escolhida: (a) mudar a fórmula da janela de fragmentação
+  (ex.: janela fixa independente de β) — decisão que envolve o Prof.
+  Alexandre, pois mexe na representação do mecanismo de evasão do adversário
+  no smart contract; ou (b) manter a fórmula atual e reformular o critério
+  do Sanity Check 3 para usar features potencialmente mais robustas a esse
+  efeito (ex.: razão eventos/volume, o "indicador de batch" já citado no
+  PLANO §5.3.1, ou contagem de sub-eventos por timestep), que podem continuar
+  monotônicas mesmo quando a amplitude bruta não é.
 - **Sanity Check 2 (ρ=1.0, λ máximo) — limite conhecido, caracterizado por
   teste, não corrigido:** τ_Kendall(A,B) não atinge o limiar de 0.4 do PLANO
   nessa configuração (τ empírico ≈ 0.134 com os parâmetros do notebook
