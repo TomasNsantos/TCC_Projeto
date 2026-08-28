@@ -101,6 +101,23 @@ via Mesa), Camada 2 (estrutura de dependência via cópula Clayton, biblioteca
   antes disso — risco explícito do PLANO §5.2.4 é o detector aprender a
   separar as classes só pelo volume total se a ordem de grandeza for
   escolhida sem cuidado.
+- **Gerador de modo adversarial / classe positiva (v0):**
+  `src/generator/adversarial_mode/` (`gerar_cenario_adversarial`) é a função
+  de composição de topo para a classe positiva, simétrica a
+  `gerar_cenario_normal()` — antes dela, essa composição (Fase 1 → Fase 2 →
+  timestamps brutos de `eventos_desembolso` → `gerar_fonte_b`) só existia
+  manualmente repetida em `tests/test_integration.py`. Recebe uma
+  `ElectionModel` já configurada e ainda não executada (mesmo padrão de
+  `gerar_cenario_normal`), roda `run()` + `resolver_desembolso()`, e só
+  chama `gerar_fonte_b` se `contrato_ativado` — sem essa checagem, a cópula
+  rodaria sem dado de entrada. **`tau_kendall` é parâmetro obrigatório, sem
+  default:** controla a força-alvo de dependência A↔B na cópula Clayton
+  (Camada 2) — suposição v0 sem valor calibrado, mesma convenção de
+  `taxa`/`volume_medio` em `normal_mode/trafego.py`. Não confundir com ρ:
+  `tau_kendall` (aqui) controla a dependência estatística entre Fonte A e
+  Fonte B; ρ (`ElectionModel`) controla só a concentração temporal do
+  timing de desembolso dentro da Fase 2 — dois eixos diferentes, um não
+  deriva do outro.
 - **Sanity Check 1 (vazio) ≠ modo normal (tráfego de fundo) — dois cenários
   de teste diferentes, um não substitui o outro:** Sanity Check 1
   (`test_sanity_check_1_lambda_zero_nao_gera_sinal_espurio`) testa o caso
