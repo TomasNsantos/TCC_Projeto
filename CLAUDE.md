@@ -290,6 +290,59 @@ via Mesa), Camada 2 (estrutura de dependência via cópula Clayton, biblioteca
   múltiplos PIDs distintos, todos diferentes do processo de teste — prova
   de que `n_jobs=2` roda em processos reais, não uma regressão silenciosa
   para execução serial disfarçada.
+- **Tracking MLflow (`src/pipeline/tracking.py`) — sistema paralelo ao
+  `Manifesto`, não um substituto.** `configurar_mlflow`/`registrar_run_mlflow`
+  dão um painel consultável (`mlflow.search_runs()`) dos parâmetros e
+  métricas de cada `run_id` do lote, com backend SQLite local — mas
+  `Manifesto` continua sendo a única fonte de verdade para resumabilidade
+  (`pendentes()`); os dois sistemas são escritos a partir do mesmo lugar em
+  `orquestrar`/`orquestrar_paralelo`, mas não se comunicam entre si.
+  **Decisão deliberada — sucesso E falha geram run do MLflow, seguindo
+  sugestão do prompt da tarefa:** se só sucessos aparecessem, o MLflow
+  daria uma vista parcial do lote (combinações que falharam simplesmente
+  não apareceriam), forçando quem olha o painel a cruzar com o SQLite mesmo
+  assim — contrariando o propósito de painel único. Falhas recebem tag
+  `status="failed"` e a mensagem de erro como parâmetro (truncado no limite
+  real de `mlflow.log_param`, `mlflow.utils.validation.MAX_PARAM_VAL_LENGTH`
+  — 6000 chars na versão instalada, não um valor adivinhado; truncamento
+  explícito em vez de deixar o comportamento da lib decidir, que levantaria
+  erro de validação em vez de truncar silenciosamente). `caminho_output` é
+  gravado como TAG, não como artifact — os HDF5s são grandes demais para
+  copiar para dentro do storage do MLflow e já têm seu próprio local
+  (`diretorio_output` do gerador real).
+  **Paridade de parâmetros entre sucesso e falha, verificada explicitamente
+  em teste (`test_registrar_run_mlflow_sucesso_e_falha_tem_mesmas_colunas_de_parametro`,
+  `tests/test_pipeline_tracking.py`):** os dois branches (`orquestrar` e o
+  laço serial de `orquestrar_paralelo`) passam o MESMO dict mesclado
+  (`params_completos` — eixos da grade + `vars(parametros_stub)` +
+  `vars(populacionais)`) para `registrar_run_mlflow`, nunca uma versão
+  parcial no branch de falha. Sem essa paridade, uma linha
+  `status="failed"` em `mlflow.search_runs()` teria colunas de parâmetro
+  faltando/`NaN` que uma linha `status="success"` tem, impedindo
+  filtrar/comparar as duas de forma confiável — quebraria o objetivo
+  declarado de painel único. Em `orquestrar_paralelo`, isso exigiu uma
+  mudança em `_rodar_uma_combinacao`: o worker agora devolve
+  `params_completos` dentro do dict de resultado (não só implícito no
+  escopo do worker), porque o laço serial que escreve no manifesto/MLflow
+  depois de `Parallel` retornar só tem `resultados` em mãos, não as
+  combinações originais.
+  **Escrita do MLflow segue a mesma regra "sempre serial, processo
+  principal" já documentada para o `Manifesto`:** nenhum worker `loky` abre
+  sessão MLflow própria — mesmo raciocínio de `orquestrar_paralelo`
+  (workers são processos separados, sem acesso ao estado do processo
+  principal; abrir recursos por worker arriscaria inconsistência sem
+  ganho correspondente).
+  `orquestrar`/`orquestrar_paralelo` NÃO recebem parâmetro novo de URI do
+  MLflow — assume-se que `configurar_mlflow()` já foi chamada por quem
+  monta o pipeline antes de invocar qualquer uma das duas, mesma
+  responsabilidade de setup que já cabia a quem constrói `Manifesto(caminho)`.
+  **Achado de ambiente, não do código do projeto:** o tracking URI default
+  do MLflow (quando `configurar_mlflow` não é chamado) é
+  `sqlite:///mlflow.db`, relativo ao `cwd` — não `./mlruns/` como se poderia
+  supor de versões antigas da lib. Os testes em `test_pipeline_runner.py`
+  usam uma fixture `autouse=True` (`_tracking_uri_isolado`) apontando para
+  `tmp_path` especificamente para evitar que rodar a suíte crie um
+  `mlflow.db` poluindo a raiz do repositório.
 
 ## Estilo
 - Código Python com type hints

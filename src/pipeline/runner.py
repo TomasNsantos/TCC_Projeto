@@ -21,6 +21,7 @@ from src.pipeline.config import (
     run_id,
 )
 from src.pipeline.manifest import Manifesto
+from src.pipeline.tracking import registrar_run_mlflow
 
 GerarParDeClasses = Callable[[dict, int, int], dict]
 """Assinatura da função injetada: ``(params, seed, n_janelas) -> dict``.
@@ -102,6 +103,7 @@ def orquestrar(
             resultado = gerar_par_de_classes(params_completos, seed, n_janelas_por_classe)
         except Exception as erro:  # noqa: BLE001 - falha isolada não deve abortar o lote
             manifesto.marcar_failed(rid, str(erro))
+            registrar_run_mlflow(rid, params_completos, seed, {"status": "failed", "erro": str(erro)})
             continue
 
         manifesto.marcar_success(
@@ -111,6 +113,7 @@ def orquestrar(
             n_contrato_nao_ativado=resultado["n_contrato_nao_ativado"],
             caminho_output=resultado["caminho_output"],
         )
+        registrar_run_mlflow(rid, params_completos, seed, {"status": "success", **resultado})
 
 
 def _registrar_grade(grade: GradeFatorial, manifesto: Manifesto) -> dict[str, dict]:
@@ -147,22 +150,29 @@ def _rodar_uma_combinacao(
     gerar_par_de_classes: GerarParDeClasses,
 ) -> tuple[str, dict]:
     """Roda uma combinação e devolve ``(run_id, resultado)`` — nunca escreve
-    no manifesto.
+    no manifesto nem no MLflow.
 
     Chamada dentro de cada processo ``loky`` por ``orquestrar_paralelo``.
-    ``resultado`` é ``{"status": "success", **retorno de gerar_par_de_classes}``
-    ou ``{"status": "failed", "erro": str(excecao)}`` — nunca propaga a
+    ``resultado`` é ``{"status": "success", "params_completos": ...,
+    **retorno de gerar_par_de_classes}`` ou ``{"status": "failed",
+    "params_completos": ..., "erro": str(excecao)}`` — nunca propaga a
     exceção, para que ``Parallel`` sempre devolva a lista completa de
     resultados (uma combinação falha não pode derrubar as outras rodando em
-    paralelo, mesma regra da versão serial).
+    paralelo, mesma regra da versão serial). ``params_completos`` viaja de
+    volta no resultado (não só implícito no escopo do worker) porque o
+    laço serial de ``orquestrar_paralelo`` que escreve no manifesto/MLflow
+    depois de ``Parallel`` retornar só tem ``resultados`` em mãos, não as
+    combinações originais — é o mesmo dict mesclado usado nos dois branches
+    aqui, garantindo a paridade de parâmetros entre sucesso e falha exigida
+    por ``registrar_run_mlflow``.
     """
     seed = combinacao["seed"]
     params_completos = _params_completos(combinacao, parametros_stub, populacionais)
     try:
         resultado = gerar_par_de_classes(params_completos, seed, n_janelas_por_classe)
     except Exception as erro:  # noqa: BLE001 - falha isolada não deve abortar o lote
-        return rid, {"status": "failed", "erro": str(erro)}
-    return rid, {"status": "success", **resultado}
+        return rid, {"status": "failed", "params_completos": params_completos, "erro": str(erro)}
+    return rid, {"status": "success", "params_completos": params_completos, **resultado}
 
 
 def orquestrar_paralelo(
@@ -201,7 +211,14 @@ def orquestrar_paralelo(
     documentada de "escrita sempre serial". Por isso ``_rodar_uma_combinacao``
     (o worker) só RETORNA ``(run_id, resultado)`` — nunca toca o manifesto
     — e ``orquestrar_paralelo`` escreve todos os resultados serialmente,
-    só depois que ``Parallel`` já devolveu a lista completa.
+    só depois que ``Parallel`` já devolveu a lista completa. O tracking
+    MLflow (``registrar_run_mlflow``) segue a MESMA regra, pelo mesmo
+    motivo — não é uma decisão nova, é extensão direta da garantia acima:
+    cada worker também não abre sessão MLflow própria, só devolve
+    ``params_completos`` dentro de ``resultado`` (ver docstring de
+    ``_rodar_uma_combinacao``) para o processo principal chamar
+    ``registrar_run_mlflow`` no mesmo laço serial que já escreve no
+    manifesto.
 
     **Por que ``backend="loky"`` (processos), não threads:**
     ``ElectionModel``/os geradores usam RNGs (``np.random.default_rng``)
@@ -245,15 +262,34 @@ def orquestrar_paralelo(
         for rid, combinacao in a_rodar
     )
 
+    seeds_por_run_id = {rid: combinacao["seed"] for rid, combinacao in a_rodar}
+
     for rid, resultado in resultados:
+        params_completos = resultado["params_completos"]
+        seed = seeds_por_run_id[rid]
+
         if resultado["status"] == "failed":
             manifesto.marcar_failed(rid, resultado["erro"])
+            registrar_run_mlflow(rid, params_completos, seed, {"status": "failed", "erro": resultado["erro"]})
             continue
+
         manifesto.marcar_success(
             rid,
             n_janelas_ok=resultado["n_janelas_ok"],
             n_janelas_falha=resultado["n_janelas_falha"],
             n_contrato_nao_ativado=resultado["n_contrato_nao_ativado"],
             caminho_output=resultado["caminho_output"],
+        )
+        registrar_run_mlflow(
+            rid,
+            params_completos,
+            seed,
+            {
+                "status": "success",
+                "n_janelas_ok": resultado["n_janelas_ok"],
+                "n_janelas_falha": resultado["n_janelas_falha"],
+                "n_contrato_nao_ativado": resultado["n_contrato_nao_ativado"],
+                "caminho_output": resultado["caminho_output"],
+            },
         )
 

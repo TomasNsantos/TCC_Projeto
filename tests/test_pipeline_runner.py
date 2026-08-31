@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 
+import mlflow
 import pytest
 
 from src.pipeline.config import (
@@ -17,6 +18,17 @@ from src.pipeline.config import (
 )
 from src.pipeline.manifest import Manifesto
 from src.pipeline.runner import orquestrar, orquestrar_paralelo
+from src.pipeline.tracking import configurar_mlflow
+
+
+@pytest.fixture(autouse=True)
+def _tracking_uri_isolado(tmp_path) -> None:
+    """`orquestrar`/`orquestrar_paralelo` agora chamam `registrar_run_mlflow`
+    incondicionalmente -- sem isto, o tracking URI default do MLflow
+    (`sqlite:///mlflow.db`, relativo ao cwd) poluiria a raiz do repositório
+    a cada execução da suíte. `autouse=True` cobre todos os testes deste
+    arquivo, inclusive os que não mencionam MLflow explicitamente."""
+    configurar_mlflow(tmp_path / "mlflow.db")
 
 
 class FakeGeradorParDeClasses:
@@ -292,4 +304,46 @@ def test_orquestrar_paralelo_usa_processos_separados_de_verdade(
     assert len(set(pids_dos_workers)) > 1, (
         f"todas as combinações rodaram no mesmo processo ({set(pids_dos_workers)}) -- n_jobs=2 não paralelizou de verdade"
     )
+    manifesto.close()
+
+
+@pytest.mark.parametrize("funcao_orquestracao", [orquestrar, orquestrar_paralelo])
+def test_orquestrar_registra_todo_run_id_no_mlflow_sucesso_e_falha(
+    funcao_orquestracao,
+    grade_pequena: GradeFatorial,
+    stub_geracao: ParametrosStubGeracao,
+    populacionais: ParametrosPopulacionaisStub,
+    caminho_manifesto: str,
+) -> None:
+    """Verificação ponta-a-ponta pedida no plano: não basta
+    `registrar_run_mlflow` funcionar isolada (`test_pipeline_tracking.py`)
+    -- confirma que `orquestrar`/`orquestrar_paralelo` de fato a chamam no
+    lugar certo, para todo `run_id`, incluindo o que falha. `_tracking_uri_isolado`
+    (autouse) já aponta o MLflow para um sqlite em `tmp_path`."""
+    manifesto = Manifesto(caminho_manifesto)
+    combinacoes = expandir_grade(grade_pequena)
+    combinacao_que_falha = combinacoes[1]
+    seed_que_falha = combinacao_que_falha["seed"]
+    params_que_falha = {k: v for k, v in combinacao_que_falha.items() if k != "seed"}
+    rid_que_falha = run_id(params_que_falha, seed_que_falha)
+
+    fake = FakeGeradorParDeClasses(
+        falha_predicado=lambda params, seed: all(params.get(k) == v for k, v in params_que_falha.items()) and seed == seed_que_falha
+    )
+    kwargs = {"n_jobs": 2} if funcao_orquestracao is orquestrar_paralelo else {}
+    funcao_orquestracao(grade_pequena, stub_geracao, populacionais, 10, manifesto, fake, **kwargs)
+
+    run_ids_esperados = _run_ids_da_grade(grade_pequena)
+    df = mlflow.search_runs()
+
+    assert len(df) == len(run_ids_esperados)
+    nomes_registrados = set(df["tags.mlflow.runName"])
+    assert nomes_registrados == set(run_ids_esperados)
+
+    status_por_nome = dict(zip(df["tags.mlflow.runName"], df["tags.status"]))
+    assert status_por_nome[rid_que_falha] == "failed"
+    for rid in run_ids_esperados:
+        if rid != rid_que_falha:
+            assert status_por_nome[rid] == "success"
+
     manifesto.close()
