@@ -205,6 +205,51 @@ via Mesa), Camada 2 (estrutura de dependência via cópula Clayton, biblioteca
   termos de F1 do detector completo (§5.2.3) ou de features de amplitude de
   pico/entropia (§5.3.1), já que ambos dependem do pipeline de detecção
   ainda não implementado.
+- **`gerar_par_de_classes_real` (`src/pipeline/geracao.py`) — fecha o loop
+  do pipeline (grade → gerador real → HDF5), cinco decisões v0 tomadas ao
+  ligar peças de tarefas anteriores que não previam exatamente como as
+  outras ficariam:**
+  1. Mapeamento `g` → `granularidade`/`unidade_alvo` de `ElectionModel`:
+     `g` vira `granularidade` direto; quando `!= "pool"`, `unidade_alvo=0`
+     — stub v0 (sempre válido, mas não é escolha definitiva de qual
+     seção/município/estado mirar).
+  2. `resultado_alvo`/`threshold_range` de `ElectionModel` não são campos
+     de `GradeFatorial`/`ParametrosPopulacionaisStub` — ficam nos defaults
+     da própria classe (`0.5`/`(0.2, 0.8)`). Limite de escopo desta camada
+     de config, não esquecimento; se precisarem variar por combinação da
+     grade, `GradeFatorial` precisa ganhar esses campos numa tarefa futura.
+  3. **Achado de compatibilidade:** `copulas.bivariate.clayton.Clayton`
+     (usada por `gerar_fonte_b` quando `tau_kendall != 0`) só aceita
+     `int`/`np.random.RandomState` para `random_state` — rejeita
+     `SeedSequence` e `np.random.Generator` diretamente, mais restrita que
+     `gerar_fonte_b`'s próprio type hint (`RandomState = int | Generator |
+     None`) sugere. Nenhum teste anterior pegou isso porque nenhum usava
+     `SeedSequence` como seed até este pipeline existir
+     (`config.derivar_seeds` produz `SeedSequence`). Contorno local em
+     `geracao.py` (`_seed_sequence_para_int`, via
+     `SeedSequence.generate_state`) — `layer2_copula/copula.py` não foi
+     alterado.
+  4. `derivar_seeds` só produz 2 seeds por janela (`seed_modelo`,
+     `seed_fonte_b`) mas a classe negativa precisa de uma terceira fonte
+     de aleatoriedade independente para `gerar_cenario_normal`'s
+     `random_state_fonte_a`. Reusar `seed_modelo` diretamente (como uma
+     primeira leitura da especificação desta tarefa sugeria) acoplaria
+     deterministicamente o RNG do `ElectionModel` (Fonte C) ao tráfego de
+     Fonte A — dois `np.random.default_rng` semeados com o MESMO valor
+     compartilham o stream de bits do PCG64 subjacente, mesmo chamando
+     métodos diferentes. Corrigido antes de codar: a seed de Fonte A da
+     classe negativa é derivada localmente via `seed_modelo.spawn(1)[0]`
+     — mesmo mecanismo de `SeedSequence.spawn` já usado no resto do
+     pipeline, sem alterar o contrato de `derivar_seeds`.
+  5. `window_id` em `escrever_run_hdf5` é por classe (`0..n_janelas-1` em
+     cada uma), não um índice global — a coluna `classe` junto com
+     `window_id` identifica uma janela unicamente nas 6 tabelas do HDF5.
+  Achado adicional de implementação (PyTables, não do gerador): `pd.HDFStore.put(...,
+  format="table")` com uma tabela de 0 linhas não escreve o grupo (falha
+  silenciosa — `store.keys()` fica vazio, leitura posterior levanta
+  `KeyError`). `escrever_run_hdf5` usa `format="fixed"` só para tabelas
+  vazias (raro — só se nenhuma janela do run teve nenhum evento naquela
+  fonte), `"table"` no caso normal.
 
 ## Estilo
 - Código Python com type hints
