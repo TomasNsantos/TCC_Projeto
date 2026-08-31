@@ -250,6 +250,46 @@ via Mesa), Camada 2 (estrutura de dependência via cópula Clayton, biblioteca
   `KeyError`). `escrever_run_hdf5` usa `format="fixed"` só para tabelas
   vazias (raro — só se nenhuma janela do run teve nenhum evento naquela
   fonte), `"table"` no caso normal.
+- **`orquestrar_paralelo` (`src/pipeline/runner.py`) — paralelização por
+  combinação×seed via `joblib.Parallel`/`backend="loky"`, não por janela
+  individual.** Decisão apoiada em medição, não suposição: o benchmark de
+  uma tarefa anterior (`scripts/benchmark_geracao.py`) mostrou ~7ms/janela,
+  desvio baixo (~7% da média), sem cauda longa — o gargalo do grid completo
+  (1.635 runs × 2.000 janelas) é volume de chamadas, não latência por
+  janela; paralelizar dentro de uma combinação pagaria overhead de processo
+  sem ganho correspondente. Cada worker (`_rodar_uma_combinacao`) roda uma
+  combinação inteira (2.000 janelas, processadas serialmente por dentro,
+  como já era) e SÓ RETORNA `(run_id, resultado)` — nunca escreve no
+  `Manifesto` diretamente. Dois motivos, ambos no docstring da função: (1)
+  `Manifesto` já documentava (antes desta tarefa) que não é
+  thread-safe/process-safe para escrita concorrente — workers `loky` são
+  processos separados, sem acesso à conexão SQLite já aberta no processo
+  principal; abrir uma conexão própria por worker sobre o mesmo arquivo
+  arriscaria `database is locked` sob escrita concorrente do SQLite; (2)
+  mesmo que funcionasse, violaria essa garantia já assumida em outros
+  lugares. `orquestrar_paralelo` agrega a lista completa de resultados de
+  `Parallel` e escreve tudo serialmente, no processo principal, só depois —
+  mesmo padrão two-phase (marcar `"running"` antes, `"success"`/`"failed"`
+  depois) que `orquestrar` já usa, garantindo que uma interrupção no meio
+  do lote paralelo deixe o manifesto num estado retomável (mesma lógica de
+  "running órfã" já testada para a versão serial). `backend="loky"`
+  (processos) em vez de threads: escolha estrutural, não reativa a um bug
+  observado — `ElectionModel`/geradores usam RNGs com estado interno por
+  instância; não há estado global compartilhado hoje, mas threads no mesmo
+  processo Python teriam risco estrutural de introduzir esse acoplamento no
+  futuro sem nenhum aviso de tipo ou teste que pegasse isso, enquanto
+  processos separados isolam isso por construção. `n_jobs` default
+  (`None` → `max(1, os.cpu_count() - 1)`) nunca cai abaixo de 1, mesmo se
+  `os.cpu_count()` devolver `None` (ambientes onde a contagem não é
+  detectável) ou a máquina tiver 1 núcleo só. Verificado empiricamente, não
+  só assumido: `test_orquestrar_paralelo_usa_processos_separados_de_verdade`
+  (`tests/test_pipeline_runner.py`) extrai o PID de cada worker (via
+  `os.getpid()` embutido no `caminho_output` do fake — mutações de estado
+  no fake dentro de um worker `loky` não se propagam de volta ao processo
+  de teste, memória separada entre processos) e confirma que aparecem
+  múltiplos PIDs distintos, todos diferentes do processo de teste — prova
+  de que `n_jobs=2` roda em processos reais, não uma regressão silenciosa
+  para execução serial disfarçada.
 
 ## Estilo
 - Código Python com type hints

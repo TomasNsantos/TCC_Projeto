@@ -4,6 +4,8 @@ importa ElectionModel nem os geradores reais.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from src.pipeline.config import (
@@ -14,7 +16,7 @@ from src.pipeline.config import (
     run_id,
 )
 from src.pipeline.manifest import Manifesto
-from src.pipeline.runner import orquestrar
+from src.pipeline.runner import orquestrar, orquestrar_paralelo
 
 
 class FakeGeradorParDeClasses:
@@ -25,7 +27,16 @@ class FakeGeradorParDeClasses:
     ``falha_seeds`` seleciona por valor de seed sozinho, não por combinação
     -- só é preciso quando a grade tem uma única seed por linha (senão o
     mesmo valor de seed aparece em várias combinações, ver
-    ``falha_predicado`` para selecionar por combinação exata)."""
+    ``falha_predicado`` para selecionar por combinação exata).
+
+    **Nota sobre uso sob `orquestrar_paralelo` (backend `loky`):** cada
+    worker roda numa cópia do fake, picklada e enviada a um processo
+    separado -- mutações em `self.chamadas` dentro de um worker NÃO se
+    propagam de volta para a instância vista pelo teste no processo
+    principal (memória separada). Por isso `caminho_output` inclui
+    `os.getpid()` -- é o único canal para o teste no processo principal
+    observar de qual processo o resultado veio, sem depender de estado
+    mutado remotamente."""
 
     def __init__(
         self,
@@ -45,7 +56,7 @@ class FakeGeradorParDeClasses:
             "n_janelas_ok": n_janelas,
             "n_janelas_falha": 0,
             "n_contrato_nao_ativado": 1,
-            "caminho_output": f"fake_{seed}.h5",
+            "caminho_output": f"fake_{seed}_pid{os.getpid()}.h5",
         }
 
 
@@ -174,4 +185,111 @@ def test_running_orfao_de_execucao_interrompida_e_retentado(
         for params, seed, _ in fake.chamadas
     )
     assert chamou_a_orfa
+    manifesto.close()
+
+
+def _linhas_finais(manifesto: Manifesto, run_ids: list[str]) -> dict[str, tuple]:
+    """Snapshot comparável de cada `run_id`: status + contagens, ignorando
+    campos que legitimamente variam entre execuções (timestamp, e
+    `caminho_output`, que agora carrega o PID do worker -- ver
+    `FakeGeradorParDeClasses`)."""
+    linhas = {}
+    for rid in run_ids:
+        linha = manifesto.obter(rid)
+        linhas[rid] = (linha["status"], linha["n_janelas_ok"], linha["n_janelas_falha"], linha["n_contrato_nao_ativado"])
+    return linhas
+
+
+def test_orquestrar_paralelo_produz_mesmo_resultado_que_serial(
+    grade_pequena: GradeFatorial,
+    stub_geracao: ParametrosStubGeracao,
+    populacionais: ParametrosPopulacionaisStub,
+    tmp_path,
+) -> None:
+    manifesto_serial = Manifesto(str(tmp_path / "serial.sqlite"))
+    orquestrar(grade_pequena, stub_geracao, populacionais, 10, manifesto_serial, FakeGeradorParDeClasses())
+
+    manifesto_paralelo = Manifesto(str(tmp_path / "paralelo.sqlite"))
+    orquestrar_paralelo(
+        grade_pequena, stub_geracao, populacionais, 10, manifesto_paralelo, FakeGeradorParDeClasses(), n_jobs=2
+    )
+
+    run_ids_esperados = _run_ids_da_grade(grade_pequena)
+    assert manifesto_serial.pendentes() == []
+    assert manifesto_paralelo.pendentes() == []
+    assert _linhas_finais(manifesto_serial, run_ids_esperados) == _linhas_finais(manifesto_paralelo, run_ids_esperados)
+
+    manifesto_serial.close()
+    manifesto_paralelo.close()
+
+
+def test_orquestrar_paralelo_falha_isolada_nao_derruba_outras(
+    grade_pequena: GradeFatorial,
+    stub_geracao: ParametrosStubGeracao,
+    populacionais: ParametrosPopulacionaisStub,
+    caminho_manifesto: str,
+) -> None:
+    manifesto = Manifesto(caminho_manifesto)
+    combinacoes = expandir_grade(grade_pequena)
+    combinacao_que_falha = combinacoes[1]
+    seed_que_falha = combinacao_que_falha["seed"]
+    params_que_falha = {k: v for k, v in combinacao_que_falha.items() if k != "seed"}
+    rid_que_falha = run_id(params_que_falha, seed_que_falha)
+
+    fake_com_falha = FakeGeradorParDeClasses(
+        falha_predicado=lambda params, seed: all(params.get(k) == v for k, v in params_que_falha.items()) and seed == seed_que_falha
+    )
+    orquestrar_paralelo(grade_pequena, stub_geracao, populacionais, 10, manifesto, fake_com_falha, n_jobs=2)
+
+    linha_falha = manifesto.obter(rid_que_falha)
+    assert linha_falha["status"] == "failed"
+    assert "falha simulada" in linha_falha["erro"]
+
+    outros_run_ids = [rid for rid in _run_ids_da_grade(grade_pequena) if rid != rid_que_falha]
+    for rid in outros_run_ids:
+        assert manifesto.obter(rid)["status"] == "success"
+    manifesto.close()
+
+
+def test_orquestrar_paralelo_usa_processos_separados_de_verdade(
+    stub_geracao: ParametrosStubGeracao,
+    populacionais: ParametrosPopulacionaisStub,
+    caminho_manifesto: str,
+) -> None:
+    """Prova empírica de que `backend="loky"` roda em processos reais, não
+    numa regressão silenciosa para execução serial disfarçada: extrai o PID
+    de cada worker via `caminho_output` (o único canal picklable de volta
+    ao processo principal -- ver nota em `FakeGeradorParDeClasses`) e
+    confirma (a) pelo menos um PID de worker difere do processo de teste, e
+    (b) aparece mais de um PID distinto entre as chamadas, provando que
+    n_jobs=2 de fato distribuiu o trabalho em vez de colapsar num único
+    worker."""
+    grade_com_varias_combinacoes = GradeFatorial(
+        g=["secao", "municipio", "estado"], delta_t=[2.0], recompensa=[5.0], rho=[0.0, 0.5], beta=[1], seeds=[1]
+    )
+    manifesto = Manifesto(caminho_manifesto)
+    fake = FakeGeradorParDeClasses()
+
+    orquestrar_paralelo(grade_com_varias_combinacoes, stub_geracao, populacionais, 10, manifesto, fake, n_jobs=2)
+
+    run_ids = _run_ids_da_grade(grade_com_varias_combinacoes)
+    assert len(run_ids) >= 3
+
+    pid_processo_teste = os.getpid()
+    pids_dos_workers = []
+    for rid in run_ids:
+        linha = manifesto.obter(rid)
+        assert linha["status"] == "success"
+        pid = int(linha["caminho_output"].rsplit("_pid", 1)[1].removesuffix(".h5"))
+        pids_dos_workers.append(pid)
+
+    print(f"\nPID do processo de teste: {pid_processo_teste}")
+    print(f"PIDs dos workers (um por combinação): {pids_dos_workers}")
+
+    assert any(pid != pid_processo_teste for pid in pids_dos_workers), (
+        "nenhum worker rodou fora do processo de teste -- orquestrar_paralelo pode ter regredido para execução serial"
+    )
+    assert len(set(pids_dos_workers)) > 1, (
+        f"todas as combinações rodaram no mesmo processo ({set(pids_dos_workers)}) -- n_jobs=2 não paralelizou de verdade"
+    )
     manifesto.close()
