@@ -97,3 +97,62 @@ def test_granularidade_diferente_de_pool_usa_unidade_alvo_zero(
 
     assert resultado["n_janelas_falha"] == 0
     assert resultado["n_janelas_ok"] == 6
+
+
+def test_fragmentacao_beta_chega_ate_o_hdf5(
+    populacionais: ParametrosPopulacionaisStub, stub_geracao: ParametrosStubGeracao, tmp_path
+) -> None:
+    """Rede de segurança para o eixo de robustez de β, que ainda não está
+    conectado a orquestrar/orquestrar_paralelo (ver CLAUDE.md/plano da
+    tarefa de teste e2e) -- confirma que a fragmentação já testada
+    isoladamente em layer2_copula.aplicar_batching (len(timestamps)*beta)
+    e em gerar_cenario_adversarial (Fonte B pareada 1:1 com
+    eventos_desembolso já fragmentado) de fato se propaga até o HDF5
+    gravado por gerar_par_de_classes_real, não só até as camadas internas.
+
+    Mesma seed/params nas duas chamadas, variando só beta: com o mesmo
+    conjunto de agentes pagos (Fase 2 não depende de beta, só a
+    fragmentação pós-decisão), len(fonte_b) deve escalar exatamente por
+    beta -- eventos_desembolso vira (n_pagos * beta) via aplicar_batching
+    (np.repeat), e gerar_fonte_b devolve "mesmo tamanho de
+    fonte_a_timestamps" (docstring de layer2_copula.gerar_fonte_b).
+    """
+    params_beta_1 = {**_PARAMS_ATIVA_CONTRATO, "beta": 1}
+    params_beta_5 = {**_PARAMS_ATIVA_CONTRATO, "beta": 5}
+
+    resultado_beta_1 = gerar_par_de_classes_real(
+        params_beta_1, seed=42, n_janelas=5, populacionais=populacionais, stub_geracao=stub_geracao, diretorio_output=tmp_path / "beta1"
+    )
+    resultado_beta_5 = gerar_par_de_classes_real(
+        params_beta_5, seed=42, n_janelas=5, populacionais=populacionais, stub_geracao=stub_geracao, diretorio_output=tmp_path / "beta5"
+    )
+
+    # filtra só classe positiva: fonte_a/fonte_b da classe negativa vêm de
+    # trafego de fundo independente (gerar_cenario_normal), que não passa
+    # por resolver_desembolso/aplicar_batching -- não deveria escalar com
+    # beta, e misturar as duas classes na soma esconderia isso.
+    fonte_a_1 = pd.read_hdf(resultado_beta_1["caminho_output"], "fonte_a")
+    fonte_a_5 = pd.read_hdf(resultado_beta_5["caminho_output"], "fonte_a")
+    fonte_a_1_positiva = fonte_a_1[fonte_a_1["classe"] == "positiva"]
+    fonte_a_5_positiva = fonte_a_5[fonte_a_5["classe"] == "positiva"]
+
+    fonte_b_1 = pd.read_hdf(resultado_beta_1["caminho_output"], "fonte_b")
+    fonte_b_5 = pd.read_hdf(resultado_beta_5["caminho_output"], "fonte_b")
+    fonte_b_1_positiva = fonte_b_1[fonte_b_1["classe"] == "positiva"]
+    fonte_b_5_positiva = fonte_b_5[fonte_b_5["classe"] == "positiva"]
+
+    # mesma seed => mesmo conjunto de agentes pagos por janela (Fase 2 nao
+    # depende de beta) => n_eventos de fonte_a (bucketizado) soma igual por
+    # janela antes de fragmentar; beta so multiplica a contagem de eventos.
+    assert len(fonte_a_1_positiva) > 0, "cenario de teste nao gerou nenhum evento de Fonte A -- nao exercita a fragmentacao"
+    assert fonte_a_5_positiva["n_eventos"].sum() == fonte_a_1_positiva["n_eventos"].sum() * 5
+
+    assert len(fonte_b_1_positiva) > 0, "cenario de teste nao ativou o contrato em nenhuma janela -- nao exercita Fonte B"
+    assert len(fonte_b_5_positiva) == len(fonte_b_1_positiva) * 5
+
+    # classe negativa nao deveria escalar com beta -- confirma que o efeito
+    # observado acima e especifico da classe positiva/Fase 2, nao um
+    # artefato de outra fonte de variacao entre as duas execucoes.
+    fonte_a_1_negativa = fonte_a_1[fonte_a_1["classe"] == "negativa"]
+    fonte_a_5_negativa = fonte_a_5[fonte_a_5["classe"] == "negativa"]
+    assert fonte_a_5_negativa["n_eventos"].sum() == fonte_a_1_negativa["n_eventos"].sum()

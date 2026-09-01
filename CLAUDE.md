@@ -343,6 +343,56 @@ via Mesa), Camada 2 (estrutura de dependência via cópula Clayton, biblioteca
   usam uma fixture `autouse=True` (`_tracking_uri_isolado`) apontando para
   `tmp_path` especificamente para evitar que rodar a suíte crie um
   `mlflow.db` poluindo a raiz do repositório.
+- **Gap descoberto e documentado (não resolvido) — `RobustezBeta`/
+  `expandir_grade_robustez` nunca foram conectados ao runner.**
+  `orquestrar`/`orquestrar_paralelo` (`runner.py`) só aceitam UM
+  `GradeFatorial`, e `expandir_grade()` sempre força `beta=1` em toda
+  combinação que produz (`grade.beta` nunca entra no produto cartesiano —
+  decisão deliberada do design fatorial, não bug, ver docstring do módulo
+  em `config.py`). `RobustezBeta`/`expandir_grade_robustez` existem em
+  `config.py` e de fato variam β, mas nenhuma tarefa até agora os ligou ao
+  manifesto ou a `gerar_par_de_classes_real` — não há caminho de código
+  que leve um `RobustezBeta` até uma execução real. Descoberto ao tentar
+  escrever um teste e2e que pedia "grid principal + robustez de β via
+  `orquestrar_paralelo()`" — pedido que descrevia uma integração
+  inexistente. **Resolvido no teste (`tests/test_pipeline_e2e.py`) sem
+  tentar simular robustez de verdade:** duas `GradeFatorial` diferentes
+  (variando `rho`, não `beta` — ambas com `beta=1`) rodadas via
+  `orquestrar_paralelo()` duas vezes sobre o MESMO manifesto, somando o
+  número de combinações pedido sem fingir cobrir o eixo de β. A rede de
+  segurança real para fragmentação de β mora em
+  `test_pipeline_geracao.py::test_fragmentacao_beta_chega_ate_o_hdf5`, que
+  chama `gerar_par_de_classes_real` diretamente (fora do runner) com
+  `beta=5` e confirma que `len(fonte_b)`/`n_eventos` no HDF5 escalam
+  exatamente por β para a classe positiva (achado ao escrever esse teste:
+  a soma tem que ser filtrada por `classe == "positiva"` — a classe
+  negativa usa tráfego de fundo independente de β, `gerar_cenario_normal`,
+  e misturar as duas classes na soma mascara a relação exata). **Conectar
+  `RobustezBeta` ao runner de verdade fica como pendência para uma tarefa
+  futura, não decidida/implementada aqui.**
+- **Teste e2e (`tests/test_pipeline_e2e.py`) — primeiro teste a rodar
+  `orquestrar_paralelo` com o gerador REAL (`criar_gerador_real`), não um
+  fake.** Todas as tarefas anteriores testaram `orquestrar`/
+  `orquestrar_paralelo` com um `gerar_par_de_classes` fake
+  (`test_pipeline_runner.py`) ou `gerar_par_de_classes_real` isolada, sem
+  passar pelo runner (`test_pipeline_geracao.py`) — nunca as duas coisas
+  juntas antes. Parâmetros reusados literalmente de
+  `test_pipeline_geracao.py::_PARAMS_ATIVA_CONTRATO` (não inventados),
+  `n_janelas_por_classe=10` (não o `N_JANELAS_POR_CLASSE_PADRAO=1000` de
+  produção — só mecânica de encaixe entre camadas). **Achado de
+  implementação, não do pipeline:** a verificação de "reexecução não
+  chama o gerador de novo" não pode usar um contador mutado dentro de um
+  closure passado a `orquestrar_paralelo`, porque os workers `loky` rodam
+  em processos separados — mutações de estado local não se propagam de
+  volta ao processo principal (mesmo problema já documentado para
+  `FakeGeradorParDeClasses` em `test_pipeline_runner.py`). Resolvido com
+  um gerador que sempre levanta (`gerador_envenenado`) na segunda
+  execução: se a resumabilidade funcionar, `_registrar_grade` filtra por
+  `manifesto.pendentes()` antes de montar a lista de trabalho, a lista
+  fica vazia, e nenhum worker é sequer disparado — nenhuma exceção
+  aparece. Se regredir, a exceção propaga e a asserção de status "success"
+  pega isso — prova mais forte que um contador que poderia mentir por
+  simplesmente nunca ser atualizado de volta.
 
 ## Estilo
 - Código Python com type hints
