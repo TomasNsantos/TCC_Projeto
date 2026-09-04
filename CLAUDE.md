@@ -479,6 +479,111 @@ via Mesa), Camada 2 (estrutura de dependência via cópula Clayton, biblioteca
   irredutibilidade estrutural de Fonte B já documentado acima, só
   referenciado brevemente no docstring da função, sem repetir a explicação
   completa.
+- **π (privacidade) — síntese consolidada das 6 tarefas de integração,
+  para referência única.** As três entradas acima registram cada decisão
+  na ordem em que foi tomada (e uma correção retroativa no meio do
+  caminho); esta entrada não substitui nem reescreve nenhuma delas — só
+  reúne o quadro completo num único lugar, incluindo as camadas de
+  `cenario.py`/`config.py`/`geracao.py`, que propagaram π sem gerar
+  entrada própria (encanamento sobre decisões já tomadas nas tarefas
+  anteriores).
+
+  **Mecanismo:** `mascara_sobrevivencia_pi(n_eventos, pi, random_state)`
+  (`src/generator/privacidade.py`) sorteia sobrevivência por evento,
+  independentemente, via Bernoulli — `rng.random(n_eventos) >= pi`,
+  probabilidade de sobrevivência `1-π`. Módulo deliberadamente
+  compartilhado entre as duas classes, para não duplicar a lógica.
+
+  **Onde entra, e assimetria com β:** classe positiva via
+  `ElectionModel.fonte_a_eventos_fronteira(random_state_pi=...)` — mascara
+  uma CÓPIA local dos eventos, nunca `self.eventos_desembolso` (que
+  continua intacto para alimentar Fonte B via `gerar_cenario_adversarial`/
+  cópula, propagado com `random_state_pi` próprio nessa função também).
+  Classe negativa via `gerar_fonte_a_normal(..., pi=..., random_state_pi=...)`
+  (`normal_mode/trafego.py`), mesmo padrão — filtra `timestamps`/`volumes`
+  locais antes da bucketização, propagado por `gerar_cenario_normal` lendo
+  `modelo_eleicao.pi` (nunca um parâmetro `pi` solto, para não duplicar o
+  valor em dois lugares que poderiam divergir). Assimetria deliberada com
+  β: β MUTA `eventos_desembolso` de verdade (dentro de
+  `resolver_desembolso`), afetando as duas fontes — decisão correta para
+  β, mas que NÃO deve ser copiada para π. π só pode mascarar o observável
+  agregado, porque Fonte B é estruturalmente irredutível mesmo sob π→1
+  (`docs/adversary_model_draft.tex`, §"What Remains Observable Even as
+  π→1" — não uma "Property 1" numerada, ver correção já registrada acima).
+  `GradeFatorial.pi`/`expandir_grade` (`src/pipeline/config.py`) expõem π
+  como sexto eixo do grid; `gerar_par_de_classes_real`
+  (`src/pipeline/geracao.py`) lê `params["pi"]` e constrói
+  `ElectionModel(pi=params["pi"], ...)` nos dois blocos (positiva e
+  negativa), derivando uma quarta fonte de aleatoriedade local
+  (`seed_pi_positiva`/`seed_pi_negativa`, via `seed_modelo.spawn(1)[0]`,
+  mesmo mecanismo já usado para `seed_fonte_a_negativa`) — passada direta
+  como `SeedSequence` para `random_state_pi`, SEM a conversão
+  `_seed_sequence_para_int` que só a seed da cópula Clayton precisa.
+
+  **Por que as duas classes são mascaradas com o mesmo π:** π não oculta a
+  existência do cruzamento de fronteira (estruturalmente público mesmo em
+  blockchains com privacidade nativa, ex. Aztec — a ponte L1↔L2 registra
+  publicamente o envio da mensagem). π modela a capacidade efetiva do
+  detector de ATRIBUIR um evento de cruzamento observado ao esquema
+  específico que o originou — conforme a privacidade aumenta, o evento se
+  mistura num conjunto de anonimato maior com todo o tráfego legítimo da
+  rede. Essa degradação de atribuição não distingue tráfego legítimo de
+  adversarial — mascarar só a classe positiva criaria uma diferença de
+  densidade artificial entre classes (atalho espúrio/shortcut learning:
+  "menos eventos ⇒ é positiva"), em vez do detector aprender o padrão de
+  coordenação genuíno (correlação A↔B) que é o alvo real da detecção.
+
+  **Divergência conhecida com a leitura literal do PLANO §5.1.2, ainda não
+  resolvida com os orientadores:** a definição formal de O(π) descreve
+  Fonte A como categoricamente observável (timestamp + volume agregado),
+  sem condicionar isso a π — só o conteúdo interno (identidade, valores
+  individuais) é que nunca fez parte da definição de Fonte A. O mecanismo
+  implementado aqui (Bernoulli por evento, removendo linhas inteiras de
+  Fonte A conforme π cresce) é mais forte do que essa definição formal
+  sustenta na letra do texto. Isso não é um erro de implementação — é uma
+  operacionalização necessária para dar ao design fatorial um efeito
+  quantitativo contínuo em π, que o §5.1.2 como está escrito não
+  especifica como produzir. Mas é uma divergência real entre o modelo
+  formal (o que vai para o artigo/adversary model) e o mecanismo do
+  gerador (o que produz os dados), que precisa de resolução explícita com
+  os orientadores: ou (a) documentar esta operacionalização como
+  simplificação deliberada do gerador, ou (b) ajustar a redação de §5.1.2
+  para refletir o mecanismo real. Nenhuma das duas foi escolhida ainda.
+
+  **`pi=0.0` como retrocompatibilidade estrita**, em todas as camadas
+  (`mascara_sobrevivencia_pi`, `ElectionModel.__init__`,
+  `gerar_fonte_a_normal`): quando `pi=0.0`, a máscara não consome nenhum
+  número aleatório (mesmo princípio já usado por `aplicar_batching` com
+  `beta=1`), então nenhum código existente muda de comportamento, mesmo
+  recebendo um `random_state_pi` "errado".
+
+  **Teto do design fatorial é decisão do PLANO, não da implementação:**
+  `GradeFatorial.pi: list[float]` aceita qualquer lista de floats em
+  `[0, 1]` — é a `ElectionModel`/`mascara_sobrevivencia_pi` que validam o
+  intervalo completo `[0,1]`, sem hardcodar um teto. O PLANO (§5.2.2) cita
+  valores tipicamente em `{0.50, 0.75, 0.90, 0.95}` — escolha de QUAIS
+  valores rodar no experimento, não uma restrição de código.
+
+  **Evidência concreta do porquê o teto importa:** em `pi=1.0`,
+  `fonte_a_eventos_fronteira()`/`gerar_fonte_a_normal()` retornam
+  DataFrame vazio (0 linhas) — confirmado numericamente em
+  `notebooks/validacao_visual_pi_fonte_a.ipynb` (célula de checagem
+  numérica, fração observada = 0.0 em `pi=1.0`). É o caso degenerado mais
+  extremo da divergência descrita acima — em `pi=1.0` o mecanismo do
+  gerador remove Fonte A por completo, enquanto a leitura literal do
+  PLANO diria que Fonte A permanece observável mesmo aí. O teto do PLANO
+  (0.50–0.95, nunca 1.0) provavelmente já evita esse extremo por uma boa
+  razão, mesmo que o PLANO não explicite isso — vale essa constatação ir
+  junto com o ponto anterior para os orientadores.
+
+  **Suposição v0, alinhamento informal:** mesma linguagem de pendência já
+  usada para `tau_kendall`/`taxa`/`volume_medio` — a interpretação de "π =
+  capacidade de atribuição do detector" foi verificada contra a
+  documentação oficial da Aztec Network (já citada nas entradas
+  anteriores), e está alinhada informalmente com o orientando, mas ainda
+  NÃO é consenso formal com os orientadores — inclui as duas pendências
+  em aberto registradas acima (divergência com §5.1.2, e o porquê do
+  teto).
 
 ## Estilo
 - Código Python com type hints
