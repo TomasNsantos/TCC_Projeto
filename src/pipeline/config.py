@@ -45,6 +45,18 @@ class GradeFatorial:
         ``ElectionModel.granularidade``/``unidade_alvo`` — que tem um
         quarto valor, ``"pool"``, fora do ``g ∈ {seção, município, estado}``
         do PLANO — fica para quando o runner existir; não decidido aqui.
+    pi : list[float]
+        Nível de privacidade (π), primeiro eixo do fatorial principal do
+        PLANO ("π × g × Δt × λ × ρ", §5.2.2) — valores tipicamente em
+        ``{0.50, 0.75, 0.90, 0.95}`` conforme o PLANO, mas sem default
+        aqui: é o caller que decide os valores, mesma convenção de
+        ``g``/``rho``/etc. Não confundir com o π já consumido por
+        ``ElectionModel``/``gerar_fonte_a_normal`` (tarefas anteriores) —
+        este campo só expõe π como eixo do GRID; a conexão entre uma
+        combinação expandida e a construção real de ``ElectionModel``
+        continua acontecendo em ``src/pipeline/geracao.py``, que ainda não
+        lê a chave ``"pi"`` do dict retornado por ``expandir_grade``
+        (pendência registrada em CLAUDE.md, não resolvida nesta tarefa).
     delta_t : list[float]
         Atraso de divulgação (Δt do design fatorial).
     recompensa : list[float]
@@ -65,6 +77,7 @@ class GradeFatorial:
     """
 
     g: list[str]
+    pi: list[float]
     delta_t: list[float]
     recompensa: list[float]
     rho: list[float]
@@ -143,7 +156,7 @@ class RobustezBeta:
 
 
 def expandir_grade(grade: GradeFatorial) -> list[dict]:
-    """Produto cartesiano de ``g × delta_t × recompensa × rho × seeds``.
+    """Produto cartesiano de ``g × pi × delta_t × recompensa × rho × seeds``.
 
     β fica de fora do produto (ver docstring do módulo e de
     ``GradeFatorial.beta``) — toda combinação retornada recebe ``beta=1``,
@@ -156,13 +169,13 @@ def expandir_grade(grade: GradeFatorial) -> list[dict]:
     Returns
     -------
     list[dict]
-        Uma combinação por dict, chaves ``g``, ``delta_t``, ``recompensa``,
-        ``rho``, ``beta`` (sempre ``1``), ``seed``.
+        Uma combinação por dict, chaves ``g``, ``pi``, ``delta_t``,
+        ``recompensa``, ``rho``, ``beta`` (sempre ``1``), ``seed``.
     """
-    combinacoes = itertools.product(grade.g, grade.delta_t, grade.recompensa, grade.rho, grade.seeds)
+    combinacoes = itertools.product(grade.g, grade.pi, grade.delta_t, grade.recompensa, grade.rho, grade.seeds)
     return [
-        {"g": g, "delta_t": delta_t, "recompensa": recompensa, "rho": rho, "beta": 1, "seed": seed}
-        for g, delta_t, recompensa, rho, seed in combinacoes
+        {"g": g, "pi": pi, "delta_t": delta_t, "recompensa": recompensa, "rho": rho, "beta": 1, "seed": seed}
+        for g, pi, delta_t, recompensa, rho, seed in combinacoes
     ]
 
 

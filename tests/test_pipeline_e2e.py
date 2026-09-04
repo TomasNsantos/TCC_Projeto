@@ -72,7 +72,15 @@ def stub_geracao() -> ParametrosStubGeracao:
 @pytest.fixture
 def grade_principal() -> GradeFatorial:
     """2(g) x 1(delta_t) x 1(recompensa) x 1(rho) x 4(seeds) = 8 combinações."""
-    return GradeFatorial(g=["pool", "secao"], delta_t=[_DELTA_T], recompensa=[_RECOMPENSA], rho=[0.3], beta=[1], seeds=[1, 2, 3, 4])
+    return GradeFatorial(
+        g=["pool", "secao"],
+        pi=[0.0],
+        delta_t=[_DELTA_T],
+        recompensa=[_RECOMPENSA],
+        rho=[0.3],
+        beta=[1],
+        seeds=[1, 2, 3, 4],
+    )
 
 
 @pytest.fixture
@@ -81,7 +89,9 @@ def grade_extra() -> GradeFatorial:
 
     rho diferente da grade_principal garante run_ids distintos (run_id não
     inclui beta como eixo de robustez real -- ver docstring do módulo)."""
-    return GradeFatorial(g=["pool"], delta_t=[_DELTA_T], recompensa=[_RECOMPENSA], rho=[0.5], beta=[1], seeds=[1, 2])
+    return GradeFatorial(
+        g=["pool"], pi=[0.0], delta_t=[_DELTA_T], recompensa=[_RECOMPENSA], rho=[0.5], beta=[1], seeds=[1, 2]
+    )
 
 
 def _run_ids_da_grade(grade: GradeFatorial) -> list[str]:

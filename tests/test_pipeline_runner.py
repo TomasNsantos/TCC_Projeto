@@ -79,7 +79,9 @@ def caminho_manifesto(tmp_path) -> str:
 
 @pytest.fixture
 def grade_pequena() -> GradeFatorial:
-    return GradeFatorial(g=["secao", "municipio"], delta_t=[2.0], recompensa=[5.0], rho=[0.0, 0.5], beta=[1], seeds=[1, 2])
+    return GradeFatorial(
+        g=["secao", "municipio"], pi=[0.0], delta_t=[2.0], recompensa=[5.0], rho=[0.0, 0.5], beta=[1], seeds=[1, 2]
+    )
 
 
 @pytest.fixture
@@ -277,7 +279,13 @@ def test_orquestrar_paralelo_usa_processos_separados_de_verdade(
     n_jobs=2 de fato distribuiu o trabalho em vez de colapsar num único
     worker."""
     grade_com_varias_combinacoes = GradeFatorial(
-        g=["secao", "municipio", "estado"], delta_t=[2.0], recompensa=[5.0], rho=[0.0, 0.5], beta=[1], seeds=[1]
+        g=["secao", "municipio", "estado"],
+        pi=[0.0],
+        delta_t=[2.0],
+        recompensa=[5.0],
+        rho=[0.0, 0.5],
+        beta=[1],
+        seeds=[1],
     )
     manifesto = Manifesto(caminho_manifesto)
     fake = FakeGeradorParDeClasses()

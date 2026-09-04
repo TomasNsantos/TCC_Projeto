@@ -19,6 +19,7 @@ from src.pipeline.config import (
 def test_expandir_grade_produz_produto_cartesiano_sem_cruzar_beta() -> None:
     grade = GradeFatorial(
         g=["secao", "municipio"],
+        pi=[0.5, 0.9],
         delta_t=[2.0, 24.0],
         recompensa=[1.0, 5.0, 10.0],
         rho=[0.0, 0.5, 1.0],
@@ -28,9 +29,12 @@ def test_expandir_grade_produz_produto_cartesiano_sem_cruzar_beta() -> None:
 
     combinacoes = expandir_grade(grade)
 
-    esperado = len(grade.g) * len(grade.delta_t) * len(grade.recompensa) * len(grade.rho) * len(grade.seeds)
+    esperado = (
+        len(grade.g) * len(grade.pi) * len(grade.delta_t) * len(grade.recompensa) * len(grade.rho) * len(grade.seeds)
+    )
     assert len(combinacoes) == esperado
     assert all(c["beta"] == 1 for c in combinacoes)
+    assert all(c["pi"] in grade.pi for c in combinacoes)
     assert len(combinacoes) == len({tuple(sorted(c.items())) for c in combinacoes})
 
 
@@ -80,6 +84,17 @@ def test_run_id_distingue_params_e_seeds_diferentes() -> None:
 
 def test_run_id_formatacao_fixa_de_floats_ignora_erro_de_ponto_flutuante() -> None:
     assert run_id({"x": 0.1 + 0.2}, seed=1) == run_id({"x": 0.3}, seed=1)
+
+
+def test_run_id_inclui_pi_no_dict_de_params() -> None:
+    """run_id ja e generico por chave (sorted(params.items())), entao pi
+    deveria funcionar sem nenhuma mudanca -- confirma isso explicitamente,
+    conforme pedido, em vez de so assumir."""
+    params_com_pi = {"g": "secao", "delta_t": 2.0, "rho": 0.5, "pi": 0.9}
+
+    assert run_id(params_com_pi, seed=3) == run_id(params_com_pi, seed=3)
+    assert run_id(params_com_pi, seed=3) != run_id({**params_com_pi, "pi": 0.5}, seed=3)
+    assert "pi-0.9000" in run_id(params_com_pi, seed=3)
 
 
 def test_derivar_seeds_e_deterministico() -> None:
