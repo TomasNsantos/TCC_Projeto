@@ -393,6 +393,36 @@ via Mesa), Camada 2 (estrutura de dependência via cópula Clayton, biblioteca
   aparece. Se regredir, a exceção propaga e a asserção de status "success"
   pega isso — prova mais forte que um contador que poderia mentir por
   simplesmente nunca ser atualizado de volta.
+- **π (privacidade) integrado ao `ElectionModel` — entra em
+  `fonte_a_eventos_fronteira`, nunca em `resolver_desembolso`, ao
+  contrário de β.** `mascara_sobrevivencia_pi`
+  (`src/generator/privacidade.py`, tarefa anterior) é chamada dentro de
+  `fonte_a_eventos_fronteira`, sobre uma CÓPIA local de
+  `self.eventos_desembolso` — o atributo do modelo nunca é reatribuído
+  nem filtrado in-place. Decisão deliberada, não um descuido em relação
+  ao padrão já usado por β (que muta `eventos_desembolso` de verdade
+  dentro de `resolver_desembolso`, afetando as duas fontes): π só pode
+  mascarar o observável AGREGADO de Fonte A, porque
+  `eventos_desembolso` também é a fonte bruta que
+  `gerar_cenario_adversarial` (tarefa futura) usa para alimentar Fonte B
+  via cópula, e Fonte B é estruturalmente irredutível — mesmo com π→1,
+  interações com o oráculo permanecem na superfície observável residual
+  do detector. Referência correta é `docs/adversary_model_draft.tex`,
+  §"What Remains Observable Even as π→1"
+  (`subsec:residual-observability`) — não existe uma "Property 1"
+  numerada com esse enunciado específico no documento (o único
+  `\begin{property}` do arquivo é o "Detector guarantee", sobre
+  δ/α/λ*(π), assunto diferente); a citação correta é essa seção/subseção
+  em prosa, corrigida aqui em relação ao pedido original da tarefa.
+  `fonte_a_eventos_fronteira` ganhou o parâmetro `random_state_pi`
+  (independente de `self.rng`, mesmo padrão de independência já usado
+  entre `random_state_fonte_b` e o RNG interno do modelo em
+  `adversarial_mode/cenario.py`). `pi=0.0` (default, novo parâmetro do
+  `ElectionModel.__init__`, validado como `rho`) é retrocompatibilidade
+  estrita: `mascara_sobrevivencia_pi` não consome nenhum número aleatório
+  nesse caso, então nenhum código existente muda de comportamento — mesmo
+  princípio já usado por β=1 em `aplicar_batching`. `resolver_desembolso`/
+  `_amostrar_timestamps_desembolso` não foram tocados nesta tarefa.
 
 ## Estilo
 - Código Python com type hints

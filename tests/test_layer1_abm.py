@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from src.generator.layer1_abm import ElectionModel
@@ -509,3 +510,83 @@ def test_beta_invalido_levanta_erro() -> None:
         ElectionModel(beta=0)
     with pytest.raises(ValueError):
         ElectionModel(beta=-1)
+
+
+def _modelo_com_desembolso_fragmentado(**overrides) -> ElectionModel:
+    kwargs = dict(
+        n_agentes=200,
+        prop_racional=1.0,
+        recompensa=10.0,
+        threshold_range=(0.0, 0.3),
+        resultado_alvo=0.0,
+        delta_t=50.0,
+        beta=5,
+        seed=7,
+    )
+    kwargs.update(overrides)
+    modelo = ElectionModel(**kwargs)
+    modelo.run()
+    modelo.resolver_desembolso()
+    return modelo
+
+
+def test_pi_zero_reproduz_comportamento_anterior_mesmo_com_beta_maior_que_um() -> None:
+    """Retrocompatibilidade: pi=0.0 (default) nao muda fonte_a_eventos_fronteira,
+    mesmo passando random_state_pi e mesmo sob fragmentacao (beta=5)."""
+    modelo = _modelo_com_desembolso_fragmentado()
+
+    fonte_a_sem_argumentos = modelo.fonte_a_eventos_fronteira()
+    fonte_a_com_pi_zero = modelo.fonte_a_eventos_fronteira(random_state_pi=123)
+
+    pd.testing.assert_frame_equal(fonte_a_sem_argumentos, fonte_a_com_pi_zero)
+
+
+def test_pi_um_mascara_todos_os_eventos() -> None:
+    modelo = _modelo_com_desembolso_fragmentado(pi=1.0)
+    assert len(modelo.eventos_desembolso) > 0
+
+    fonte_a = modelo.fonte_a_eventos_fronteira(random_state_pi=1)
+    assert len(fonte_a) == 0
+    assert list(fonte_a.columns) == ["timestep", "n_eventos", "volume"]
+
+
+def test_pi_intermediario_reduz_numero_de_eventos_observados() -> None:
+    modelo = _modelo_com_desembolso_fragmentado(pi=0.5)
+    n_eventos_brutos = len(modelo.eventos_desembolso)
+    assert n_eventos_brutos > 0
+
+    fonte_a = modelo.fonte_a_eventos_fronteira(random_state_pi=1)
+    assert fonte_a["n_eventos"].sum() < n_eventos_brutos
+
+
+def test_pi_nunca_muta_eventos_desembolso() -> None:
+    modelo = _modelo_com_desembolso_fragmentado(pi=1.0)
+    eventos_antes = list(modelo.eventos_desembolso)
+
+    modelo.fonte_a_eventos_fronteira(random_state_pi=1)
+
+    assert modelo.eventos_desembolso == eventos_antes
+
+
+def test_pi_random_state_pi_e_reprodutivel_por_seed() -> None:
+    modelo = _modelo_com_desembolso_fragmentado(pi=0.5)
+
+    fonte_a_1 = modelo.fonte_a_eventos_fronteira(random_state_pi=99)
+    fonte_a_2 = modelo.fonte_a_eventos_fronteira(random_state_pi=99)
+    pd.testing.assert_frame_equal(fonte_a_1, fonte_a_2)
+
+    # random_state_pi diferente PODE dar resultado diferente -- nao exigimos
+    # diferenca (coincidencia rara e legitima), so confirmamos que o
+    # parametro e de fato consultado (mascara nao e sempre a mesma
+    # independente da seed).
+    resultados_por_seed = [
+        modelo.fonte_a_eventos_fronteira(random_state_pi=seed)["n_eventos"].sum() for seed in range(10)
+    ]
+    assert len(set(resultados_por_seed)) > 1
+
+
+def test_pi_invalido_levanta_erro() -> None:
+    with pytest.raises(ValueError):
+        ElectionModel(pi=-0.1)
+    with pytest.raises(ValueError):
+        ElectionModel(pi=1.1)

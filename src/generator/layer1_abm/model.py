@@ -18,6 +18,18 @@ pós-resultado" (PLANO §5.1.2/§5.2.2).
 
 A Fonte C (resultado eleitoral por seção) é gerada diretamente pela simulação
 de agentes e não passa pelo acoplamento via cópula (Camada 2).
+
+π (privacidade, PLANO §5.1.2) entra só em ``fonte_a_eventos_fronteira``, não
+em ``resolver_desembolso`` — mascara apenas o OBSERVÁVEL agregado de Fonte
+A, nunca ``self.eventos_desembolso`` em si. Isso é deliberadamente diferente
+de como β é implementado (β muta ``eventos_desembolso`` de verdade, afetando
+tanto Fonte A quanto Fonte B): ``eventos_desembolso`` também alimenta Fonte B
+(via ``gerar_cenario_adversarial``, camada de composição fora deste módulo),
+e Fonte B é estruturalmente irredutível — mesmo com π→1, interações com o
+oráculo permanecem na superfície observável residual do detector
+(`docs/adversary_model_draft.tex`, §"What Remains Observable Even as
+π→1"). Mascarar ``eventos_desembolso`` diretamente vazaria o efeito de π
+para Fonte B, contrariando essa premissa do modelo do adversário.
 """
 
 from __future__ import annotations
@@ -30,6 +42,9 @@ import pandas as pd
 
 from src.generator.layer1_abm.agent import VoterAgent
 from src.generator.layer2_copula import aplicar_batching
+from src.generator.privacidade import mascara_sobrevivencia_pi
+
+RandomState = int | np.random.Generator | None
 
 _GRANULARIDADES_VALIDAS = ("pool", "secao", "municipio", "estado")
 
@@ -128,6 +143,22 @@ class ElectionModel(mesa.Model):
         Default ``1`` é retrocompatibilidade estrita: ``aplicar_batching``
         é no-op exato em β≤1 (nem consome números aleatórios), então nada
         muda em relação ao comportamento anterior a este parâmetro.
+    pi : float
+        Nível de privacidade (π) do design fatorial, em ``[0, 1]``
+        (PLANO §5.1.2) — "fração de informação inacessível ao observador
+        externo", não parâmetro populacional, mesma categoria de
+        ``delta_t``/``rho``/``beta``. Consultado só em
+        ``fonte_a_eventos_fronteira`` (via
+        ``src.generator.privacidade.mascara_sobrevivencia_pi``), nunca
+        aqui em ``resolver_desembolso`` — π mascara apenas o observável
+        agregado de Fonte A, nunca ``self.eventos_desembolso``, que
+        também alimenta Fonte B e por isso deve permanecer intacto (ver
+        docstring do módulo e de ``fonte_a_eventos_fronteira`` para a
+        assimetria com β, que muta ``eventos_desembolso`` de propósito).
+        Default ``0.0`` é retrocompatibilidade estrita: com ``pi=0.0``,
+        ``mascara_sobrevivencia_pi`` não consome nenhum número aleatório e
+        nenhum evento é mascarado — comportamento idêntico ao de antes
+        deste parâmetro existir.
     prob_conformidade : float
         Probabilidade, em ``[0, 1]``, de um agente aderido efetivamente votar
         conforme prometido (``VoterAgent.votou_conforme``, sorteada uma única
@@ -165,6 +196,7 @@ class ElectionModel(mesa.Model):
         delta_t: float = 10.0,
         rho: float = 0.0,
         beta: int = 1,
+        pi: float = 0.0,
         prob_conformidade: float = 1.0,
         seed: int | None = None,
     ) -> None:
@@ -172,6 +204,8 @@ class ElectionModel(mesa.Model):
             raise ValueError("rho deve estar em [0, 1].")
         if beta < 1:
             raise ValueError("beta deve ser >= 1.")
+        if not 0.0 <= pi <= 1.0:
+            raise ValueError("pi deve estar em [0, 1].")
         if not 0.0 <= prob_conformidade <= 1.0:
             raise ValueError("prob_conformidade deve estar em [0, 1].")
         if n_candidatos < 1:
@@ -200,6 +234,7 @@ class ElectionModel(mesa.Model):
         self.delta_t = delta_t
         self.rho = rho
         self.beta = beta
+        self.pi = pi
         self.prob_conformidade = prob_conformidade
 
         if granularidade != "pool":
@@ -371,7 +406,7 @@ class ElectionModel(mesa.Model):
         usa_concentrado = self.rng.random(n) < self.rho
         return np.where(usa_concentrado, concentrado, uniforme)
 
-    def fonte_a_eventos_fronteira(self) -> pd.DataFrame:
+    def fonte_a_eventos_fronteira(self, random_state_pi: RandomState = None) -> pd.DataFrame:
         """Observável da Fonte A: timestamp, contagem e volume monetário do desembolso.
 
         Reflete a Fase 2 (pós-resultado), não a adesão (Fase 1) — ver
@@ -388,12 +423,49 @@ class ElectionModel(mesa.Model):
         independente sob β>1 (o "indicador de batch" do PLANO §5.3.1) — com
         β=1 a razão ainda é constante, como sempre foi.
 
+        **Máscara de privacidade π — aplicada SOMENTE aqui, nunca em
+        ``self.eventos_desembolso``.** Antes da bucketização, cada evento é
+        sorteado independentemente para sobreviver (via
+        ``src.generator.privacidade.mascara_sobrevivencia_pi``, usando
+        ``self.pi`` e ``random_state_pi``) e só os sobreviventes entram na
+        contagem/volume retornados. A máscara opera sobre uma CÓPIA local
+        dos eventos — ``self.eventos_desembolso`` nunca é reatribuído nem
+        filtrado in-place. Isso é intencional e DIFERENTE de como β é
+        implementado (β muta ``eventos_desembolso`` de verdade, dentro de
+        ``resolver_desembolso``, afetando tanto este método quanto
+        qualquer consumidor externo de ``eventos_desembolso``): π só pode
+        mascarar o observável AGREGADO de Fonte A, porque
+        ``eventos_desembolso`` também é a fonte bruta que
+        ``gerar_cenario_adversarial`` usa para alimentar Fonte B via
+        cópula, e Fonte B é estruturalmente irredutível — mesmo com π→1,
+        interações com o oráculo permanecem na superfície observável
+        residual do detector (`docs/adversary_model_draft.tex`,
+        §"What Remains Observable Even as π→1"). Mascarar
+        ``eventos_desembolso`` diretamente vazaria o efeito de π para
+        Fonte B, contrariando essa premissa. Não "corrigir" esta assimetria
+        para seguir o padrão de β numa tarefa futura — é proposital, não
+        uma inconsistência.
+
+        Com ``self.pi == 0.0`` (default), ``mascara_sobrevivencia_pi`` não
+        consome nenhum número aleatório e todos os eventos sobrevivem —
+        comportamento idêntico ao de antes deste parâmetro existir,
+        independente de ``random_state_pi``.
+
+        Parameters
+        ----------
+        random_state_pi : int | np.random.Generator | None
+            Semente para a máscara de privacidade — independente de
+            ``self.rng`` (que já rege Fase 1/Fase 2, incluindo timing de
+            desembolso e fragmentação por β). Não consultado quando
+            ``self.pi == 0.0``.
+
         Returns
         -------
         pd.DataFrame
             Colunas ``timestep`` (int, floor do timestamp de desembolso),
-            ``n_eventos`` (contagem de desembolsos no timestep) e ``volume``
-            (magnitude monetária agregada no timestep).
+            ``n_eventos`` (contagem de desembolsos observados no timestep,
+            já filtrada por π) e ``volume`` (magnitude monetária agregada
+            no timestep, idem).
         """
         if not self.eventos_desembolso:
             return pd.DataFrame(
@@ -404,7 +476,19 @@ class ElectionModel(mesa.Model):
                 }
             )
 
-        timesteps = [int(np.floor(t)) for t, _ in self.eventos_desembolso]
+        mascara = mascara_sobrevivencia_pi(len(self.eventos_desembolso), self.pi, random_state_pi)
+        eventos_observados = [evento for evento, sobrevive in zip(self.eventos_desembolso, mascara) if sobrevive]
+
+        if not eventos_observados:
+            return pd.DataFrame(
+                {
+                    "timestep": pd.Series(dtype=int),
+                    "n_eventos": pd.Series(dtype=int),
+                    "volume": pd.Series(dtype=float),
+                }
+            )
+
+        timesteps = [int(np.floor(t)) for t, _ in eventos_observados]
         contagem = (
             pd.Series(timesteps)
             .value_counts()
