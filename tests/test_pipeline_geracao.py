@@ -12,7 +12,9 @@ from src.pipeline.geracao import gerar_par_de_classes_real
 
 # recompensa alta + threshold_range default => adesao quase universal, contrato
 # ativa com folga acima do resultado_alvo default (0.5) na maioria das janelas.
-_PARAMS_ATIVA_CONTRATO = {"g": "pool", "delta_t": 20.0, "recompensa": 10.0, "rho": 0.3, "beta": 1}
+# pi=0.0 preserva o comportamento de antes da integracao de pi ao gerador real
+# (retrocompatibilidade estrita) -- testes especificos sobre pi sobrescrevem.
+_PARAMS_ATIVA_CONTRATO = {"g": "pool", "delta_t": 20.0, "recompensa": 10.0, "rho": 0.3, "beta": 1, "pi": 0.0}
 
 
 @pytest.fixture
@@ -156,3 +158,53 @@ def test_fragmentacao_beta_chega_ate_o_hdf5(
     fonte_a_1_negativa = fonte_a_1[fonte_a_1["classe"] == "negativa"]
     fonte_a_5_negativa = fonte_a_5[fonte_a_5["classe"] == "negativa"]
     assert fonte_a_5_negativa["n_eventos"].sum() == fonte_a_1_negativa["n_eventos"].sum()
+
+
+def test_pi_alto_reduz_eventos_de_fonte_a_positiva_e_negativa(
+    populacionais: ParametrosPopulacionaisStub, stub_geracao: ParametrosStubGeracao, tmp_path
+) -> None:
+    """Rede de seguranca para a integracao de pi ao gerador real: confirma
+    que params["pi"] chega ate ElectionModel(pi=...)/gerar_cenario_normal
+    e reduz o numero de eventos observados em Fonte A das duas classes,
+    nao so dentro das camadas isoladas (model.py/trafego.py, ja testadas
+    em tarefas anteriores)."""
+    params_pi_zero = {**_PARAMS_ATIVA_CONTRATO, "pi": 0.0}
+    params_pi_alto = {**_PARAMS_ATIVA_CONTRATO, "pi": 0.9}
+
+    resultado_pi_zero = gerar_par_de_classes_real(
+        params_pi_zero, seed=42, n_janelas=5, populacionais=populacionais, stub_geracao=stub_geracao, diretorio_output=tmp_path / "pi0"
+    )
+    resultado_pi_alto = gerar_par_de_classes_real(
+        params_pi_alto, seed=42, n_janelas=5, populacionais=populacionais, stub_geracao=stub_geracao, diretorio_output=tmp_path / "pi9"
+    )
+
+    fonte_a_pi_zero = pd.read_hdf(resultado_pi_zero["caminho_output"], "fonte_a")
+    fonte_a_pi_alto = pd.read_hdf(resultado_pi_alto["caminho_output"], "fonte_a")
+
+    for classe in ("positiva", "negativa"):
+        n_pi_zero = fonte_a_pi_zero.loc[fonte_a_pi_zero["classe"] == classe, "n_eventos"].sum()
+        n_pi_alto = fonte_a_pi_alto.loc[fonte_a_pi_alto["classe"] == classe, "n_eventos"].sum()
+        assert n_pi_zero > 0, f"cenario de teste nao gerou eventos de Fonte A para classe {classe} com pi=0.0"
+        assert n_pi_alto < n_pi_zero, f"pi=0.9 nao reduziu n_eventos de Fonte A para classe {classe}"
+
+
+def test_pi_reprodutibilidade_mesma_seed_produz_mesmo_hdf5(
+    populacionais: ParametrosPopulacionaisStub, stub_geracao: ParametrosStubGeracao, tmp_path
+) -> None:
+    """Confirma que a nova derivacao local de seed_pi_positiva/seed_pi_negativa
+    (via seed_modelo.spawn(1)[0]) e deterministica -- mesma seed de topo
+    produz o mesmo HDF5 em duas execucoes, com pi>0 exercitando o novo
+    caminho de codigo (nao so pi=0.0, que nao consome random_state_pi)."""
+    params_pi_alto = {**_PARAMS_ATIVA_CONTRATO, "pi": 0.9}
+
+    resultado_1 = gerar_par_de_classes_real(
+        params_pi_alto, seed=7, n_janelas=4, populacionais=populacionais, stub_geracao=stub_geracao, diretorio_output=tmp_path / "run1"
+    )
+    resultado_2 = gerar_par_de_classes_real(
+        params_pi_alto, seed=7, n_janelas=4, populacionais=populacionais, stub_geracao=stub_geracao, diretorio_output=tmp_path / "run2"
+    )
+
+    for tabela in ("fonte_a", "fonte_b", "fonte_c_secao", "fonte_c_municipio", "fonte_c_estado", "metadados_janela"):
+        df1 = pd.read_hdf(resultado_1["caminho_output"], tabela)
+        df2 = pd.read_hdf(resultado_2["caminho_output"], tabela)
+        assert df1.equals(df2), f"tabela {tabela} difere entre as duas execucoes com pi=0.9"

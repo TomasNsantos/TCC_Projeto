@@ -19,7 +19,7 @@ from src.pipeline.config import ParametrosPopulacionaisStub, ParametrosStubGerac
 from src.pipeline.runner import GerarParDeClasses
 from src.pipeline.storage import JanelaNegativa, JanelaPositiva, escrever_run_hdf5
 
-_EIXOS_GRADE = ("g", "delta_t", "recompensa", "rho", "beta")
+_EIXOS_GRADE = ("g", "pi", "delta_t", "recompensa", "rho", "beta")
 
 
 def _seed_sequence_para_int(seed_sequence: np.random.SeedSequence) -> int:
@@ -50,8 +50,9 @@ def gerar_par_de_classes_real(
     r"""Gera `n_janelas` janelas de cada classe (positiva/negativa) e grava em HDF5.
 
     Implementação real da interface `GerarParDeClasses` (`runner.py`).
-    `params` é lido só pelas chaves de eixo de grade (``g``, ``delta_t``,
-    ``recompensa``, ``rho``, ``beta``) — mesmo que venha com chaves extras
+    `params` é lido só pelas chaves de eixo de grade (``g``, ``pi``,
+    ``delta_t``, ``recompensa``, ``rho``, ``beta``) — mesmo que venha com
+    chaves extras
     de `populacionais`/`stub_geracao` misturadas (como acontece quando
     chamada via `orquestrar()`, que funde tudo num dict só antes de
     invocar a função injetada), essas chaves extras são ignoradas: os
@@ -90,6 +91,35 @@ def gerar_par_de_classes_real(
     `SeedSequence.spawn` já usado no resto do pipeline, sem alterar o
     contrato de `derivar_seeds` (que continua devolvendo só o par).
 
+    **Quarta fonte de aleatoriedade: a máscara de privacidade π.** Mesmo
+    raciocínio acima, agora aplicado a `random_state_pi` (consumido por
+    `mascara_sobrevivencia_pi` dentro de `gerar_cenario_adversarial`/
+    `gerar_cenario_normal`): reusar `seed_fonte_b` ou `seed_modelo`
+    diretamente para isso acoplaria deterministicamente dois RNGs que
+    deveriam ser independentes — na classe positiva, `seed_modelo` já
+    alimenta `ElectionModel(seed=seed_modelo)`; na negativa, `seed_modelo`
+    já alimenta `ElectionModel` E `seed_fonte_a_negativa` também deriva
+    dela. Por isso `seed_pi_positiva`/`seed_pi_negativa` são derivadas
+    LOCALMENTE, aqui, via `seed_modelo.spawn(1)[0]` — chamada adicional de
+    `.spawn()` sobre a mesma `seed_modelo` já usada para
+    `seed_fonte_a_negativa`; cada chamada de `.spawn()` devolve um filho
+    diferente e independente via `spawn_key` interno incrementado, então
+    chamar de novo sobre a mesma `seed_modelo` é seguro e não colide com
+    `seed_fonte_a_negativa`.
+
+    **Nota sobre `_seed_sequence_para_int`:** só `seed_fonte_b` passa por
+    essa conversão antes de chegar a `gerar_cenario_adversarial`/
+    `gerar_cenario_normal`, pela restrição já documentada da lib `copulas`
+    (só aceita `int`/`RandomState`, usada quando `tau_kendall != 0`).
+    `seed_fonte_a_negativa`, `seed_pi_positiva` e `seed_pi_negativa` usam
+    `SeedSequence` diretamente, SEM essa conversão — `mascara_sobrevivencia_pi`
+    (assim como `gerar_fonte_a_normal`) flui para `np.random.default_rng`,
+    que aceita `SeedSequence` nativamente. Aplicar `_seed_sequence_para_int`
+    nessas três sementes seria inofensivo mas criaria uma inconsistência
+    de padrão sem motivo real, sugerindo a um leitor futuro que
+    `mascara_sobrevivencia_pi` compartilha a restrição da lib `copulas` —
+    não compartilha.
+
     Falhas são capturadas por janela individual, não abortam o lote — só
     propaga (`RuntimeError`) se TODAS as janelas de uma classe falharem
     (sinal de erro sistemático, não pontual).
@@ -97,8 +127,8 @@ def gerar_par_de_classes_real(
     Parameters
     ----------
     params : dict
-        Combinação da grade — só ``g``/``delta_t``/``recompensa``/``rho``/
-        ``beta`` são lidos.
+        Combinação da grade — só ``g``/``pi``/``delta_t``/``recompensa``/
+        ``rho``/``beta`` são lidos.
     seed : int
     n_janelas : int
         Por classe (positiva e negativa geram `n_janelas` cada).
@@ -157,12 +187,17 @@ def gerar_par_de_classes_real(
                 delta_t=params["delta_t"],
                 rho=params["rho"],
                 beta=params["beta"],
+                pi=params["pi"],
                 granularidade=granularidade,
                 unidade_alvo=unidade_alvo,
                 seed=seed_modelo,
             )
+            seed_pi_positiva = seed_modelo.spawn(1)[0]
             cenario = gerar_cenario_adversarial(
-                modelo, stub_geracao.tau_kendall, _seed_sequence_para_int(seed_fonte_b)
+                modelo,
+                stub_geracao.tau_kendall,
+                _seed_sequence_para_int(seed_fonte_b),
+                random_state_pi=seed_pi_positiva,
             )
             janelas_positivas.append((window_id, cenario, seed_modelo, seed_fonte_b))
         except Exception as erro:  # noqa: BLE001 - falha por janela nao aborta o lote
@@ -192,11 +227,13 @@ def gerar_par_de_classes_real(
                 delta_t=params["delta_t"],
                 rho=params["rho"],
                 beta=params["beta"],
+                pi=params["pi"],
                 granularidade=granularidade,
                 unidade_alvo=unidade_alvo,
                 seed=seed_modelo,
             )
             seed_fonte_a_negativa = seed_modelo.spawn(1)[0]
+            seed_pi_negativa = seed_modelo.spawn(1)[0]
             cenario = gerar_cenario_normal(
                 modelo,
                 janela=params["delta_t"],
@@ -205,6 +242,7 @@ def gerar_par_de_classes_real(
                 taxa_fonte_b=stub_geracao.taxa_fonte_b,
                 random_state_fonte_a=seed_fonte_a_negativa,
                 random_state_fonte_b=seed_fonte_b,
+                random_state_pi=seed_pi_negativa,
             )
             janelas_negativas.append((window_id, cenario, seed_modelo, seed_fonte_b))
         except Exception as erro:  # noqa: BLE001 - falha por janela nao aborta o lote
