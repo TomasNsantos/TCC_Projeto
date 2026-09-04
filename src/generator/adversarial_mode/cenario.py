@@ -62,6 +62,7 @@ def gerar_cenario_adversarial(
     modelo_eleicao: ElectionModel,
     tau_kendall: float,
     random_state_fonte_b: RandomState = None,
+    random_state_pi: RandomState = None,
 ) -> CenarioAdversarial:
     r"""Gera uma amostra da classe positiva: CSC real + Fonte B acoplada via cópula.
 
@@ -84,13 +85,30 @@ def gerar_cenario_adversarial(
     usa a versão bucketizada — é o formato que o resto do pipeline espera;
     só os timestamps internos passados à cópula são brutos.
 
+    **π (privacidade) — sem parâmetro próprio nesta função, lido de
+    ``modelo_eleicao.pi``.** ``fonte_a`` é obtida via
+    ``modelo_eleicao.fonte_a_eventos_fronteira(random_state_pi=random_state_pi)``,
+    que já consulta ``self.pi`` internamente — não duplicamos o valor de π
+    como um segundo parâmetro aqui, para não abrir a possibilidade de
+    divergir do valor configurado no modelo. **A garantia de que Fonte B
+    nunca é afetada por π não vem da ORDEM em que esta função chama as
+    coisas** (``gerar_fonte_b`` roda antes de
+    ``fonte_a_eventos_fronteira`` no código acima, mas isso é incidental)
+    — vem de como ``fonte_a_eventos_fronteira`` é implementada: ela
+    mascara uma CÓPIA local dos eventos, nunca reatribui nem filtra
+    ``self.eventos_desembolso`` in-place (ver docstring do método/CLAUDE.md).
+    ``gerar_fonte_b`` já usa ``modelo_eleicao.eventos_desembolso`` bruto
+    diretamente (linha acima), então mesmo que a ordem das duas chamadas
+    fosse invertida, o resultado seria idêntico — a proteção é estrutural,
+    não posicional.
+
     Parameters
     ----------
     modelo_eleicao : ElectionModel
         Instância configurada, ainda não executada (``steps == 0``). Todos
         os parâmetros populacionais, de granularidade e do design fatorial
-        (incluindo ``recompensa``, ``rho``, ``beta``) ficam a critério de
-        quem constrói o modelo — esta função não os duplica.
+        (incluindo ``recompensa``, ``rho``, ``beta``, ``pi``) ficam a
+        critério de quem constrói o modelo — esta função não os duplica.
     tau_kendall : float
         Força-alvo de dependência entre Fonte A e Fonte B na cópula Clayton
         (``[0, 1)``, ver ``gerar_fonte_b``). Obrigatório e sem default:
@@ -105,6 +123,11 @@ def gerar_cenario_adversarial(
         interno de ``modelo_eleicao`` (``modelo_eleicao.rng``, que já rege
         Fase 1/Fase 2, incluindo o timing de desembolso e a fragmentação
         por β).
+    random_state_pi : int | np.random.Generator | None
+        Semente para a máscara de privacidade π, repassada a
+        ``fonte_a_eventos_fronteira`` — independente de
+        ``random_state_fonte_b`` e de ``modelo_eleicao.rng``. Não
+        consultada quando ``modelo_eleicao.pi == 0.0``.
 
     Returns
     -------
@@ -136,7 +159,7 @@ def gerar_cenario_adversarial(
         fonte_b = np.array([])
 
     return CenarioAdversarial(
-        fonte_a=modelo_eleicao.fonte_a_eventos_fronteira(),
+        fonte_a=modelo_eleicao.fonte_a_eventos_fronteira(random_state_pi=random_state_pi),
         fonte_b=fonte_b,
         resultado_por_secao=modelo_eleicao.resultado_eleitoral_por_secao(),
         resultado_por_municipio=modelo_eleicao.resultado_eleitoral_por_municipio(),

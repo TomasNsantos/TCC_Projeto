@@ -181,3 +181,58 @@ def test_fonte_a_normal_pi_random_state_pi_e_reprodutivel() -> None:
     )
 
     assert fonte_a_1.equals(fonte_a_2)
+
+
+_KWARGS_CENARIO_PI = dict(n_agentes=200, n_candidatos=3, recompensa=0.0, seed=1)
+
+
+def test_gerar_cenario_normal_pi_zero_reproduz_comportamento_anterior() -> None:
+    modelo_1 = ElectionModel(pi=0.0, **_KWARGS_CENARIO_PI)
+    modelo_2 = ElectionModel(pi=0.0, **_KWARGS_CENARIO_PI)
+
+    cenario_sem_seed_pi = gerar_cenario_normal(
+        modelo_1, JANELA, taxa_fonte_a=5.0, volume_medio_fonte_a=1000.0, taxa_fonte_b=1.0,
+        random_state_fonte_a=1, random_state_fonte_b=2,
+    )
+    cenario_com_seed_pi = gerar_cenario_normal(
+        modelo_2, JANELA, taxa_fonte_a=5.0, volume_medio_fonte_a=1000.0, taxa_fonte_b=1.0,
+        random_state_fonte_a=1, random_state_fonte_b=2, random_state_pi=999,
+    )
+
+    assert cenario_sem_seed_pi.fonte_a.equals(cenario_com_seed_pi.fonte_a)
+    assert np.array_equal(cenario_sem_seed_pi.fonte_b, cenario_com_seed_pi.fonte_b)
+
+
+def test_gerar_cenario_normal_random_state_pi_muda_fonte_a_mas_nunca_fonte_b() -> None:
+    """Mesma garantia central testada em test_adversarial_mode.py, agora
+    para o pipeline de cenario da classe negativa."""
+    modelo_1 = ElectionModel(pi=0.9, **_KWARGS_CENARIO_PI)
+    modelo_2 = ElectionModel(pi=0.9, **_KWARGS_CENARIO_PI)
+
+    cenario_1 = gerar_cenario_normal(
+        modelo_1, JANELA, taxa_fonte_a=5.0, volume_medio_fonte_a=1000.0, taxa_fonte_b=1.0,
+        random_state_fonte_a=1, random_state_fonte_b=2, random_state_pi=1,
+    )
+    cenario_2 = gerar_cenario_normal(
+        modelo_2, JANELA, taxa_fonte_a=5.0, volume_medio_fonte_a=1000.0, taxa_fonte_b=1.0,
+        random_state_fonte_a=1, random_state_fonte_b=2, random_state_pi=2,
+    )
+
+    assert not cenario_1.fonte_a.equals(cenario_2.fonte_a)
+    assert np.array_equal(cenario_1.fonte_b, cenario_2.fonte_b)
+
+
+def test_gerar_cenario_normal_pi_alto_reduz_linhas_de_fonte_a() -> None:
+    modelo_pi_zero = ElectionModel(pi=0.0, **_KWARGS_CENARIO_PI)
+    modelo_pi_alto = ElectionModel(pi=0.9, **_KWARGS_CENARIO_PI)
+
+    cenario_pi_zero = gerar_cenario_normal(
+        modelo_pi_zero, JANELA, taxa_fonte_a=5.0, volume_medio_fonte_a=1000.0, taxa_fonte_b=1.0,
+        random_state_fonte_a=1, random_state_fonte_b=2,
+    )
+    cenario_pi_alto = gerar_cenario_normal(
+        modelo_pi_alto, JANELA, taxa_fonte_a=5.0, volume_medio_fonte_a=1000.0, taxa_fonte_b=1.0,
+        random_state_fonte_a=1, random_state_fonte_b=2, random_state_pi=1,
+    )
+
+    assert cenario_pi_alto.fonte_a["n_eventos"].sum() < cenario_pi_zero.fonte_a["n_eventos"].sum()

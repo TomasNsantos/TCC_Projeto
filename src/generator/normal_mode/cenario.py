@@ -55,6 +55,7 @@ def gerar_cenario_normal(
     taxa_fonte_b: float,
     random_state_fonte_a: RandomState = None,
     random_state_fonte_b: RandomState = None,
+    random_state_pi: RandomState = None,
 ) -> CenarioNormal:
     r"""Gera uma amostra da classe negativa: eleição real sem CSC + tráfego de fundo.
 
@@ -70,13 +71,24 @@ def gerar_cenario_normal(
     que não exista nenhum caminho no código onde a semente de uma fonte
     influencia a outra.
 
+    **π (privacidade) — sem parâmetro próprio nesta função, lido de
+    ``modelo_eleicao.pi``.** ``fonte_a`` é obtida via
+    ``gerar_fonte_a_normal(..., pi=modelo_eleicao.pi, random_state_pi=random_state_pi)``
+    — mesma razão de `gerar_cenario_adversarial` (`adversarial_mode/cenario.py`):
+    não duplicar o valor de π como um segundo parâmetro solto, que
+    poderia divergir do valor já configurado no `ElectionModel` recebido.
+    `gerar_fonte_b_normal` continua sem nenhum parâmetro de π — tráfego de
+    fundo de Fonte B, estruturalmente irredutível pelo mesmo motivo já
+    documentado para a Fonte B da classe positiva (ver
+    `trafego.py`/CLAUDE.md).
+
     Parameters
     ----------
     modelo_eleicao : ElectionModel
         Instância ainda não executada (``steps == 0``), com ``recompensa=0.0``
         e ``n_candidatos > 1`` já configurados pelo caller. Todos os demais
-        parâmetros populacionais/de granularidade ficam a critério de quem
-        constrói o modelo — esta função não os duplica.
+        parâmetros populacionais/de granularidade (incluindo ``pi``) ficam a
+        critério de quem constrói o modelo — esta função não os duplica.
     janela : float
         Duração da janela de observação de Fonte A/B (independente de
         ``modelo_eleicao.n_steps``, que rege só a campanha de adesão).
@@ -85,6 +97,11 @@ def gerar_cenario_normal(
         suposições v0 sem valor calibrado, ver docstring de ``trafego.py``.
     random_state_fonte_a, random_state_fonte_b : int | np.random.Generator | None
         Sementes independentes para Fonte A e Fonte B.
+    random_state_pi : int | np.random.Generator | None
+        Semente para a máscara de privacidade π, repassada a
+        ``gerar_fonte_a_normal`` — independente de ``random_state_fonte_a``/
+        ``random_state_fonte_b``. Não consultada quando
+        ``modelo_eleicao.pi == 0.0``.
 
     Returns
     -------
@@ -119,7 +136,14 @@ def gerar_cenario_normal(
 
     modelo_eleicao.run()
 
-    fonte_a = gerar_fonte_a_normal(janela, taxa_fonte_a, volume_medio_fonte_a, random_state_fonte_a)
+    fonte_a = gerar_fonte_a_normal(
+        janela,
+        taxa_fonte_a,
+        volume_medio_fonte_a,
+        random_state_fonte_a,
+        pi=modelo_eleicao.pi,
+        random_state_pi=random_state_pi,
+    )
     fonte_b = gerar_fonte_b_normal(janela, taxa_fonte_b, random_state_fonte_b)
 
     return CenarioNormal(
