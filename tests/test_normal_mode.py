@@ -128,3 +128,56 @@ def test_gerar_cenario_normal_nunca_chama_resolver_desembolso() -> None:
 
     assert modelo.contrato_ativado is None
     assert modelo.eventos_desembolso == []
+
+
+def test_fonte_a_normal_pi_zero_reproduz_comportamento_anterior() -> None:
+    fonte_a_sem_argumentos = gerar_fonte_a_normal(janela=JANELA, taxa=2.0, volume_medio=1000.0, random_state=1)
+    fonte_a_com_pi_zero = gerar_fonte_a_normal(
+        janela=JANELA, taxa=2.0, volume_medio=1000.0, random_state=1, pi=0.0, random_state_pi=42
+    )
+
+    assert fonte_a_sem_argumentos.equals(fonte_a_com_pi_zero)
+
+
+def test_fonte_a_normal_pi_um_produz_vazio() -> None:
+    fonte_a_bruta = gerar_fonte_a_normal(janela=JANELA, taxa=5.0, volume_medio=1000.0, random_state=1)
+    assert fonte_a_bruta["n_eventos"].sum() > 0  # garante que há algo para mascarar
+
+    fonte_a_mascarada = gerar_fonte_a_normal(
+        janela=JANELA, taxa=5.0, volume_medio=1000.0, random_state=1, pi=1.0, random_state_pi=1
+    )
+
+    assert fonte_a_mascarada.empty
+    assert list(fonte_a_mascarada.columns) == ["timestep", "n_eventos", "volume"]
+
+
+def test_fonte_a_normal_pi_intermediario_reduz_eventos_observados() -> None:
+    fonte_a_bruta = gerar_fonte_a_normal(janela=JANELA, taxa=5.0, volume_medio=1000.0, random_state=1)
+    total_bruto = fonte_a_bruta["n_eventos"].sum()
+    assert total_bruto > 0
+
+    fonte_a_mascarada = gerar_fonte_a_normal(
+        janela=JANELA, taxa=5.0, volume_medio=1000.0, random_state=1, pi=0.5, random_state_pi=1
+    )
+
+    assert fonte_a_mascarada["n_eventos"].sum() < total_bruto
+
+
+def test_fonte_b_normal_nao_muda_com_a_introducao_de_pi() -> None:
+    """Regressao: gerar_fonte_b_normal continua sem parametro pi, mesma
+    assinatura/comportamento de antes desta tarefa."""
+    fonte_b_1 = gerar_fonte_b_normal(janela=JANELA, taxa=1.0, random_state=42)
+    fonte_b_2 = gerar_fonte_b_normal(janela=JANELA, taxa=1.0, random_state=42)
+
+    assert np.array_equal(fonte_b_1, fonte_b_2)
+
+
+def test_fonte_a_normal_pi_random_state_pi_e_reprodutivel() -> None:
+    fonte_a_1 = gerar_fonte_a_normal(
+        janela=JANELA, taxa=5.0, volume_medio=1000.0, random_state=1, pi=0.5, random_state_pi=99
+    )
+    fonte_a_2 = gerar_fonte_a_normal(
+        janela=JANELA, taxa=5.0, volume_medio=1000.0, random_state=1, pi=0.5, random_state_pi=99
+    )
+
+    assert fonte_a_1.equals(fonte_a_2)

@@ -423,6 +423,62 @@ via Mesa), Camada 2 (estrutura de dependência via cópula Clayton, biblioteca
   nesse caso, então nenhum código existente muda de comportamento — mesmo
   princípio já usado por β=1 em `aplicar_batching`. `resolver_desembolso`/
   `_amostrar_timestamps_desembolso` não foram tocados nesta tarefa.
+  **Correção (tarefa posterior):** a formulação original desta entrada
+  descrevia π como ocultando o cruzamento de fronteira em si; isso foi
+  corrigido após verificação da documentação oficial da Aztec Network, que
+  confirma que o cruzamento é estruturalmente público (a ponte L1↔L2
+  registra publicamente o envio da mensagem; o que fica oculto é o
+  conteúdo — remetente, valor — via provas de conhecimento zero). Ver a
+  entrada abaixo sobre `gerar_fonte_a_normal` para a formulação corrigida
+  de o que π representa (capacidade de atribuição do detector, não
+  ocultação do cruzamento).
+- **π integrado a `gerar_fonte_a_normal` (`src/generator/normal_mode/trafego.py`)
+  — classe negativa também mascarada, não só a positiva.** Mesmo mecanismo
+  de `fonte_a_eventos_fronteira` (`mascara_sobrevivencia_pi` sobre uma
+  cópia local, antes da bucketização), mas a pergunta aqui é DIFERENTE:
+  não é sobre ONDE π entra no fluxo de uma classe (isso já estava
+  resolvido para a positiva), é sobre POR QUE as duas classes precisam do
+  mesmo tratamento. Resposta, com o entendimento corrigido de o que π
+  representa:
+
+  π não modela a existência do cruzamento de fronteira em si — esse
+  cruzamento é estruturalmente público mesmo em blockchains com
+  privacidade nativa como Aztec Network: a ponte L1↔L2 precisa registrar
+  publicamente que uma mensagem foi enviada, mesmo quando o conteúdo
+  específico (remetente, valor exato) é ocultado por provas de
+  conhecimento zero. A documentação da Aztec confirma isso diretamente:
+  pontos de entrada/saída são descritos pela própria Aztec Labs como o
+  principal ponto de vazamento de privacidade da rede, não o protocolo em
+  si — e a mitigação recomendada é reduzir a frequência de cruzamentos (o
+  que já corresponde ao mecanismo de fragmentação β do adversary model),
+  não esconder o cruzamento. π modela, em vez disso, a capacidade efetiva
+  do detector de ATRIBUIR um evento de cruzamento observado ao esquema de
+  incentivo específico que o originou — conforme a privacidade da execução
+  aumenta, o evento fica misturado num conjunto de anonimato maior junto
+  com todo o resto do tráfego legítimo da rede, e menos metadado
+  incidental sobra para correlacionar/atribuir aquele cruzamento
+  especificamente ao esquema sob investigação. Uma fração crescente de
+  eventos, portanto, escapa da atribuição efetiva do detector — mesmo que
+  o cruzamento em si tenha ocorrido de forma pública.
+
+  Essa é a razão de aplicar o mesmo π às duas classes: essa degradação de
+  atribuição não distingue tráfego legítimo de adversarial — os dois tipos
+  de evento se misturam no mesmo conjunto de anonimato — então mascarar só
+  a classe positiva criaria uma diferença de densidade artificial entre
+  classes (atalho espúrio para o detector: "amostra tem menos eventos ⇒ é
+  positiva"), em vez de o detector aprender o padrão de coordenação
+  genuíno (correlação A↔B) que é o alvo real da detecção.
+
+  Suposição v0 pendente de validação formal com os orientadores (mesmo
+  tratamento de `tau_kendall`/`candidato_alvo` etc.) — verificada contra a
+  documentação oficial da Aztec Network
+  (`docs.aztec.network/participate/basics/bridging`,
+  `aztec.network/blog/explaining-the-network-in-aztec-network`), não é uma
+  suposição sem lastro, mas ainda não é consenso formal do projeto.
+  `gerar_fonte_b_normal` não ganhou parâmetro π — mesmo motivo de
+  irredutibilidade estrutural de Fonte B já documentado acima, só
+  referenciado brevemente no docstring da função, sem repetir a explicação
+  completa.
 
 ## Estilo
 - Código Python com type hints
