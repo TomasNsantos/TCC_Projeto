@@ -93,6 +93,22 @@ class ParametrosPopulacionaisStub:
     Todos os defaults são copiados literalmente dos defaults de
     ``ElectionModel.__init__`` (`src/generator/layer1_abm/model.py`) — não
     são uma segunda fonte de verdade sobre o valor provisório, são a mesma.
+
+    Attributes
+    ----------
+    candidato_alvo : int | None
+        Índice do candidato-alvo, em ``[0, n_candidatos)`` quando ``int``.
+        ``None`` significa "sortear o candidato-alvo por janela/cenário"
+        — funcionalidade ainda não implementada aqui (fica para uma tarefa
+        futura em ``src/pipeline/geracao.py``); esta tarefa só amplia o
+        TIPO aceito, sem lógica de sorteio. Um ``int`` explícito preserva
+        exatamente o comportamento atual — mesmo princípio de
+        retrocompatibilidade estrita v0 já usado por ``pi=0.0``
+        (`src/generator/privacidade.py`/`ElectionModel`) e ``beta=1``
+        (`layer2_copula.aplicar_batching`): o valor por si só não muda
+        nada até que o código consumidor (`geracao.py`) seja atualizado
+        para reconhecer ``None`` e agir sobre ele. Default continua ``0``,
+        idêntico ao de antes desta tarefa.
     """
 
     n_agentes: int = 100
@@ -100,7 +116,7 @@ class ParametrosPopulacionaisStub:
     prop_racional: float = 0.9
     n_secoes: int = 5
     n_candidatos: int = 1
-    candidato_alvo: int = 0
+    candidato_alvo: int | None = 0
     prob_conformidade: float = 1.0
 
 

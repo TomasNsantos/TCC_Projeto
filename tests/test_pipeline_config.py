@@ -7,6 +7,7 @@ import pytest
 
 from src.pipeline.config import (
     GradeFatorial,
+    ParametrosPopulacionaisStub,
     ParametrosStubGeracao,
     RobustezBeta,
     derivar_seeds,
@@ -128,3 +129,14 @@ def test_derivar_seeds_seed_modelo_distinta_entre_janelas() -> None:
 def test_derivar_seeds_classe_invalida_levanta_erro() -> None:
     with pytest.raises(ValueError):
         derivar_seeds(seed=1, n_janelas=5, classe="invalida")
+
+
+def test_parametros_populacionais_stub_candidato_alvo_aceita_none() -> None:
+    """candidato_alvo: int | None -- None e reservado para sorteio por
+    janela/cenario (tarefa futura em geracao.py, nao implementada aqui).
+    Esta tarefa so amplia o tipo aceito; None nao tem efeito nenhum ainda,
+    so precisa ser aceito sem erro."""
+    populacionais = ParametrosPopulacionaisStub(candidato_alvo=None)
+    assert populacionais.candidato_alvo is None
+
+    assert ParametrosPopulacionaisStub().candidato_alvo == 0

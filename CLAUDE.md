@@ -585,6 +585,25 @@ via Mesa), Camada 2 (estrutura de dependência via cópula Clayton, biblioteca
   em aberto registradas acima (divergência com §5.1.2, e o porquê do
   teto).
 
+- **`ParametrosPopulacionaisStub.candidato_alvo` amplia o tipo para
+  `int | None` — só o tipo, sem lógica de sorteio ainda.**
+  `src/pipeline/config.py`. `None` é reservado para "sortear o
+  candidato-alvo por janela/cenário", funcionalidade que fica para uma
+  tarefa futura em `src/pipeline/geracao.py` (que hoje lê
+  `populacionais.candidato_alvo` só como `int`, passado direto a
+  `ElectionModel(candidato_alvo=...)` — não reconhece `None` ainda; passar
+  `None` hoje quebraria `ElectionModel.__init__`, que valida
+  `0 <= candidato_alvo < n_candidatos`). Mesmo princípio de
+  retrocompatibilidade estrita v0 já usado por `pi=0.0`
+  (`src/generator/privacidade.py`) e `beta=1`
+  (`layer2_copula.aplicar_batching`): o default continua `0`, idêntico ao
+  de antes desta tarefa — um `int` explícito não muda nenhum
+  comportamento existente. Diferença importante em relação a `pi`/`beta`:
+  lá, o valor "neutro" (`0.0`/`1`) já era suficiente para o mecanismo
+  inteiro funcionar como no-op; aqui, `None` sozinho não faz nada — só
+  passa a ser aceito PELO TIPO, sem nenhum código consumidor reagindo a
+  ele ainda. Não confundir "tipo aceito" com "funcionalidade implementada".
+
 ## Estilo
 - Código Python com type hints
 - Docstrings estilo NumPy
