@@ -603,6 +603,63 @@ via Mesa), Camada 2 (estrutura de dependência via cópula Clayton, biblioteca
   inteiro funcionar como no-op; aqui, `None` sozinho não faz nada — só
   passa a ser aceito PELO TIPO, sem nenhum código consumidor reagindo a
   ele ainda. Não confundir "tipo aceito" com "funcionalidade implementada".
+- **`candidato_alvo` — síntese consolidada das duas tarefas (tipo +
+  sorteio), mesmo padrão da síntese de π.** A entrada acima registrou só a
+  ampliação de tipo (`int | None`); esta consolida o mecanismo completo,
+  já implementado em `gerar_par_de_classes_real` (`src/pipeline/geracao.py`).
+
+  **Onde o sorteio acontece:** dentro de cada um dos dois loops (positiva
+  e negativa), ANTES de construir `ElectionModel` — quando
+  `populacionais.candidato_alvo is None`, uma seed local
+  `seed_candidato_alvo = seed_modelo.spawn(1)[0]` é derivada e o valor é
+  sorteado via
+  `int(np.random.default_rng(seed_candidato_alvo).integers(0, populacionais.n_candidatos))`
+  (o `int(...)` evita vazar `np.int64` para um campo `int` puro). Quando
+  `candidato_alvo` é um `int` explícito, nenhuma seed nova é derivada —
+  branch sem sorteio, idêntico ao código anterior a estas duas tarefas.
+
+  **Independência entre classes do MESMO `window_id` — decisão
+  deliberada, não um descuido:** positiva e negativa sorteiam com
+  `seed_modelo`s distintas (raízes diferentes de `derivar_seeds`, por
+  construção), então a mesma janela pode ter candidatos-alvo diferentes
+  nas duas classes. Verificado em teste
+  (`test_candidato_alvo_none_positiva_e_negativa_sorteiam_independentemente`,
+  `tests/test_pipeline_geracao.py`) — não assumido.
+
+  **Efeito colateral no `spawn_key` das seeds já existentes, nas DUAS
+  classes, só quando `candidato_alvo is None`:** como
+  `seed_candidato_alvo` precisa existir antes da construção do
+  `ElectionModel` (é argumento do construtor), ela vira o PRIMEIRO
+  `.spawn()` chamado sobre `seed_modelo` nesse caminho, empurrando os
+  spawns seguintes em uma posição — SIMETRICAMENTE nas duas classes:
+  - Classe positiva: `seed_pi_positiva` passa de `spawn_key=0` para `1`.
+  - Classe negativa: `seed_fonte_a_negativa`/`seed_pi_negativa` passam de
+    `spawn_key=0,1` para `1,2`.
+  Isso muda os valores numéricos dessas seeds em relação ao código
+  anterior, mas só no caminho `candidato_alvo=None`, que não era
+  executável antes (não havia HDF5 de produção nesse caminho para
+  quebrar). Quando `candidato_alvo` é `int` explícito (sem `.spawn()`
+  novo), a ordem/valores de `seed_pi_positiva`/`seed_fonte_a_negativa`/
+  `seed_pi_negativa` permanecem BYTE-A-BYTE idênticos ao código anterior
+  — **verificado empiricamente, não só argumentado:**
+  `test_candidato_alvo_zero_explicito_reproduz_hdf5_do_codigo_anterior_a_esta_tarefa`
+  compara o HDF5 gerado pelo código novo contra fixtures
+  (`tests/fixtures/candidato_alvo_retrocompat/*.pkl`) geradas ANTES da
+  edição desta tarefa, via `pd.testing.assert_frame_equal(check_like=False)`
+  em cada uma das 6 tabelas.
+
+  **Achado de metodologia de teste, não do gerador:** hash SHA-256 do
+  arquivo `.h5` bruto não serve para checar retrocompatibilidade de
+  conteúdo — `pd.HDFStore`/PyTables embute timestamp/metadado interno a
+  cada escrita, então duas escritas do MESMO DataFrame produzem arquivos
+  com hashes diferentes mesmo sem nenhuma mudança de conteúdo (verificado
+  empiricamente: ~11 bytes divergiram entre duas escritas idênticas com
+  poucos segundos de intervalo). Por isso as fixtures de referência salvam
+  o CONTEÚDO lido de volta (`pd.read_hdf` → `.to_pickle()`), não o arquivo
+  `.h5` em si — `.pkl` em vez de `.parquet` porque `pyarrow`/`fastparquet`
+  não são dependências diretas do projeto (`pyarrow` aparece só como
+  transitiva de outra lib já instalada; `.pkl` é nativo do pandas e
+  preserva dtype exatamente).
 
 ## Estilo
 - Código Python com type hints

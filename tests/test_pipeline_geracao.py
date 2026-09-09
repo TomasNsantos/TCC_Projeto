@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import Mock
 
 import pandas as pd
 import pytest
 
+from src.generator.layer1_abm import ElectionModel as _ElectionModelReal
 from src.pipeline.config import ParametrosPopulacionaisStub, ParametrosStubGeracao
 from src.pipeline.geracao import gerar_par_de_classes_real
+
+_FIXTURES_CANDIDATO_ALVO = Path(__file__).parent / "fixtures" / "candidato_alvo_retrocompat"
 
 # recompensa alta + threshold_range default => adesao quase universal, contrato
 # ativa com folga acima do resultado_alvo default (0.5) na maioria das janelas.
@@ -208,3 +212,145 @@ def test_pi_reprodutibilidade_mesma_seed_produz_mesmo_hdf5(
         df1 = pd.read_hdf(resultado_1["caminho_output"], tabela)
         df2 = pd.read_hdf(resultado_2["caminho_output"], tabela)
         assert df1.equals(df2), f"tabela {tabela} difere entre as duas execucoes com pi=0.9"
+
+
+def _monkeypatch_election_model_espiao(monkeypatch: pytest.MonkeyPatch, chamadas: list) -> None:
+    """Espiona o argumento candidato_alvo de cada chamada a ElectionModel,
+    sem impedir que ela rode de verdade -- alveja src.pipeline.geracao.ElectionModel
+    (o NOME COMO IMPORTADO dentro de geracao.py via
+    `from src.generator.layer1_abm import ElectionModel`), nao
+    src.generator.layer1_abm.ElectionModel na origem: patchar na origem nao
+    afeta a referencia que geracao.py ja importou para seu proprio namespace
+    no momento do import do modulo (mesmo padrao ja usado em
+    test_n_candidatos_um_levanta_erro_claro_antes_de_gerar_qualquer_janela)."""
+
+    def _construtor_espiao(*args, **kwargs):
+        chamadas.append(kwargs["candidato_alvo"])
+        return _ElectionModelReal(*args, **kwargs)
+
+    monkeypatch.setattr("src.pipeline.geracao.ElectionModel", _construtor_espiao)
+
+
+def test_candidato_alvo_none_varia_entre_janelas_em_pelo_menos_uma_classe(
+    stub_geracao: ParametrosStubGeracao, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """candidato_alvo=None deve sortear um valor por janela, nao usar um
+    unico valor fixo para o run inteiro.
+
+    Calculo de falso positivo: evento de falha = "as duas classes sao
+    internamente constantes ao mesmo tempo" (todas as 20 janelas de uma
+    classe sortearam o mesmo candidato). Para uma classe com 20 sorteios
+    uniformes independentes em {0,...,4} (n_candidatos=5),
+    P(constante) = 5 * (1/5)**20 = 5**-19 ~= 2e-14. Como as duas classes
+    usam seed_modelo's independentes (raizes distintas de derivar_seeds),
+    P(as duas constantes ao mesmo tempo) = (5**-19)**2 ~= 4e-27 --
+    extremamente improvavel, nao e flaky na pratica.
+    """
+    populacionais_none = ParametrosPopulacionaisStub(n_agentes=50, n_secoes=4, n_candidatos=5, candidato_alvo=None)
+    chamadas: list = []
+    _monkeypatch_election_model_espiao(monkeypatch, chamadas)
+
+    gerar_par_de_classes_real(
+        _PARAMS_ATIVA_CONTRATO, seed=1, n_janelas=20, populacionais=populacionais_none, stub_geracao=stub_geracao, diretorio_output=tmp_path
+    )
+
+    assert len(chamadas) == 40  # 20 positiva + 20 negativa, dois loops sequenciais
+    positiva, negativa = chamadas[:20], chamadas[20:]
+    assert all(isinstance(c, int) for c in chamadas), "candidato_alvo deve ser int puro, nao np.int64"
+    assert len(set(positiva)) > 1 or len(set(negativa)) > 1, (
+        "candidato_alvo=None nao variou entre janelas em nenhuma das duas classes -- "
+        "sorteio pode nao estar acontecendo por janela"
+    )
+
+
+def test_candidato_alvo_none_e_reprodutivel_com_mesma_seed(
+    stub_geracao: ParametrosStubGeracao, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    populacionais_none = ParametrosPopulacionaisStub(n_agentes=50, n_secoes=4, n_candidatos=5, candidato_alvo=None)
+
+    chamadas_1: list = []
+    _monkeypatch_election_model_espiao(monkeypatch, chamadas_1)
+    gerar_par_de_classes_real(
+        _PARAMS_ATIVA_CONTRATO, seed=3, n_janelas=10, populacionais=populacionais_none, stub_geracao=stub_geracao, diretorio_output=tmp_path / "run1"
+    )
+
+    chamadas_2: list = []
+    _monkeypatch_election_model_espiao(monkeypatch, chamadas_2)
+    gerar_par_de_classes_real(
+        _PARAMS_ATIVA_CONTRATO, seed=3, n_janelas=10, populacionais=populacionais_none, stub_geracao=stub_geracao, diretorio_output=tmp_path / "run2"
+    )
+
+    assert chamadas_1 == chamadas_2
+
+
+def test_candidato_alvo_zero_explicito_reproduz_hdf5_do_codigo_anterior_a_esta_tarefa(
+    tmp_path,
+) -> None:
+    """Retrocompatibilidade verificada contra o código PRÉ-tarefa, não
+    contra outra chamada pós-tarefa (que só provaria determinismo interno
+    do código novo, não retrocompatibilidade com o antigo).
+
+    Fixtures em tests/fixtures/candidato_alvo_retrocompat/*.pkl foram
+    geradas ANTES de qualquer edição desta tarefa em geracao.py (código do
+    commit 9df5774 -- só o tipo de candidato_alvo tinha mudado para
+    int | None, sem lógica de sorteio), com:
+        populacionais = ParametrosPopulacionaisStub(n_agentes=100, n_secoes=4,
+            n_candidatos=3, candidato_alvo=0)
+        stub_geracao = ParametrosStubGeracao(tau_kendall=0.5, taxa_fonte_a=1.0,
+            volume_medio_fonte_a=1000.0, taxa_fonte_b=1.0)
+        params = {"g": "pool", "delta_t": 20.0, "recompensa": 10.0, "rho": 0.3,
+            "beta": 1, "pi": 0.0}
+        gerar_par_de_classes_real(params, seed=99, n_janelas=4, ...)
+    Comparação via pd.testing.assert_frame_equal(check_like=False) contra
+    o conteúdo lido de volta via pd.read_hdf de cada uma das 6 tabelas --
+    não hash bruto do arquivo .h5 (verificado empiricamente que
+    pd.HDFStore/PyTables embute timestamp/metadado interno a cada escrita,
+    então duas escritas do MESMO DataFrame produzem arquivos com hashes
+    diferentes mesmo sem nenhuma mudança de conteúdo).
+    """
+    populacionais = ParametrosPopulacionaisStub(n_agentes=100, n_secoes=4, n_candidatos=3, candidato_alvo=0)
+    stub_geracao = ParametrosStubGeracao(tau_kendall=0.5, taxa_fonte_a=1.0, volume_medio_fonte_a=1000.0, taxa_fonte_b=1.0)
+    params = {"g": "pool", "delta_t": 20.0, "recompensa": 10.0, "rho": 0.3, "beta": 1, "pi": 0.0}
+
+    resultado = gerar_par_de_classes_real(
+        params, seed=99, n_janelas=4, populacionais=populacionais, stub_geracao=stub_geracao, diretorio_output=tmp_path
+    )
+
+    for tabela in ("fonte_a", "fonte_b", "fonte_c_secao", "fonte_c_municipio", "fonte_c_estado", "metadados_janela"):
+        df_novo = pd.read_hdf(resultado["caminho_output"], tabela)
+        df_referencia = pd.read_pickle(_FIXTURES_CANDIDATO_ALVO / f"{tabela}.pkl")
+        pd.testing.assert_frame_equal(df_novo, df_referencia, check_like=False)
+
+
+def test_candidato_alvo_none_positiva_e_negativa_sorteiam_independentemente(
+    stub_geracao: ParametrosStubGeracao, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Prova de independencia entre classes do MESMO window_id -- decisao
+    deliberada, nao um descuido: positiva e negativa usam seed_modelo's
+    distintas (raizes diferentes de derivar_seeds), entao seus sorteios de
+    candidato_alvo nunca compartilham entropia.
+
+    Calculo de falso positivo, DIFERENTE do teste de variancia acima:
+    evento de falha aqui e "para TODO indice i, os dois valores pareados
+    (positiva[i], negativa[i]) coincidem por acaso" -- nao "uma classe e
+    constante". Por indice, com as duas classes sorteando uniformemente e
+    independentemente em {0,...,4} (n_candidatos=5),
+    P(positiva[i] == negativa[i]) = 1/5. Os 20 pareamentos sao
+    independentes entre si (seeds independentes por janela via
+    derivar_seeds), entao P(todos os 20 pareamentos coincidem) =
+    (1/5)**20 ~= 1e-14 -- extremamente improvavel.
+    """
+    populacionais_none = ParametrosPopulacionaisStub(n_agentes=50, n_secoes=4, n_candidatos=5, candidato_alvo=None)
+    chamadas: list = []
+    _monkeypatch_election_model_espiao(monkeypatch, chamadas)
+
+    gerar_par_de_classes_real(
+        _PARAMS_ATIVA_CONTRATO, seed=5, n_janelas=20, populacionais=populacionais_none, stub_geracao=stub_geracao, diretorio_output=tmp_path
+    )
+
+    positiva, negativa = chamadas[:20], chamadas[20:]
+    divergencias = [i for i in range(20) if positiva[i] != negativa[i]]
+    assert len(divergencias) > 0, (
+        "candidato_alvo sorteado foi identico entre positiva e negativa em TODAS as janelas -- "
+        "sinal de acoplamento indevido entre as duas classes (deveriam ser independentes)"
+    )

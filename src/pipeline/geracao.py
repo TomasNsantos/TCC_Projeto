@@ -120,6 +120,47 @@ def gerar_par_de_classes_real(
     `mascara_sobrevivencia_pi` compartilha a restrição da lib `copulas` —
     não compartilha.
 
+    **Quinta fonte de aleatoriedade: sorteio de `candidato_alvo` quando
+    `populacionais.candidato_alvo is None`.** Mesmo raciocínio das seções
+    acima: `ElectionModel(candidato_alvo=...)` precisa de um valor
+    concreto ANTES de o modelo existir, então não há como derivar essa
+    seed a partir de nada que já exista no modelo — `seed_candidato_alvo =
+    seed_modelo.spawn(1)[0]`, chamada antes de qualquer outro `.spawn()`
+    sobre aquela `seed_modelo`, tanto na classe positiva quanto na
+    negativa. Sorteado via
+    `int(np.random.default_rng(seed_candidato_alvo).integers(0, populacionais.n_candidatos))`
+    — o `int(...)` explícito evita vazar `np.int64` para um campo que é
+    `int` puro em todo o resto do código. Quando `candidato_alvo` é um
+    `int` explícito (não `None`), nenhuma seed nova é derivada e nenhum
+    número aleatório extra é consumido — comportamento idêntico ao de
+    antes desta funcionalidade.
+
+    **Sorteio independente entre classe positiva e negativa do MESMO
+    `window_id` — decisão deliberada, não um descuido a "corrigir" numa
+    tarefa futura.** As duas classes usam `seed_modelo`s distintas
+    (raízes diferentes de `derivar_seeds`, por construção), então os
+    sorteios de `candidato_alvo` nunca compartilham entropia entre si —
+    a mesma janela pode ter candidatos-alvo diferentes nas duas classes.
+
+    **Efeito colateral no `spawn_key` das seeds já existentes, nas DUAS
+    classes, quando `candidato_alvo is None`:** como
+    `seed_candidato_alvo` precisa ser derivada ANTES da construção do
+    `ElectionModel` (é argumento do construtor), ela passa a ser o
+    PRIMEIRO `.spawn()` chamado sobre `seed_modelo` nesse caminho,
+    empurrando os spawns seguintes em uma posição: na classe positiva,
+    `seed_pi_positiva` passa de `spawn_key=0` para `spawn_key=1`; na
+    classe negativa, `seed_fonte_a_negativa`/`seed_pi_negativa` passam de
+    `spawn_key=0,1` para `spawn_key=1,2`. Isso muda os valores numéricos
+    dessas seeds em relação ao código anterior a esta tarefa, mas SÓ no
+    caminho `candidato_alvo=None` — que não era executável antes
+    (`geracao.py` não reconhecia `None`), então não há HDF5 de produção
+    nesse caminho para quebrar. Quando `candidato_alvo` é um `int`
+    explícito (branch sem sorteio, sem `.spawn()` novo), a ordem/valores
+    de `seed_pi_positiva`/`seed_fonte_a_negativa`/`seed_pi_negativa`
+    permanecem BYTE-A-BYTE idênticos ao código anterior — verificado
+    empiricamente em teste (`tests/fixtures/candidato_alvo_retrocompat/`),
+    não só argumentado.
+
     Falhas são capturadas por janela individual, não abortam o lote — só
     propaga (`RuntimeError`) se TODAS as janelas de uma classe falharem
     (sinal de erro sistemático, não pontual).
@@ -175,13 +216,19 @@ def gerar_par_de_classes_real(
     ultimo_erro_positiva: Exception | None = None
     for window_id, (seed_modelo, seed_fonte_b) in enumerate(seeds_positivas):
         try:
+            if populacionais.candidato_alvo is None:
+                seed_candidato_alvo = seed_modelo.spawn(1)[0]
+                candidato_alvo = int(np.random.default_rng(seed_candidato_alvo).integers(0, populacionais.n_candidatos))
+            else:
+                candidato_alvo = populacionais.candidato_alvo
+
             modelo = ElectionModel(
                 n_agentes=populacionais.n_agentes,
                 alpha_beta=populacionais.alpha_beta,
                 prop_racional=populacionais.prop_racional,
                 n_secoes=populacionais.n_secoes,
                 n_candidatos=populacionais.n_candidatos,
-                candidato_alvo=populacionais.candidato_alvo,
+                candidato_alvo=candidato_alvo,
                 prob_conformidade=populacionais.prob_conformidade,
                 recompensa=params["recompensa"],
                 delta_t=params["delta_t"],
@@ -215,13 +262,19 @@ def gerar_par_de_classes_real(
     ultimo_erro_negativa: Exception | None = None
     for window_id, (seed_modelo, seed_fonte_b) in enumerate(seeds_negativas):
         try:
+            if populacionais.candidato_alvo is None:
+                seed_candidato_alvo = seed_modelo.spawn(1)[0]
+                candidato_alvo = int(np.random.default_rng(seed_candidato_alvo).integers(0, populacionais.n_candidatos))
+            else:
+                candidato_alvo = populacionais.candidato_alvo
+
             modelo = ElectionModel(
                 n_agentes=populacionais.n_agentes,
                 alpha_beta=populacionais.alpha_beta,
                 prop_racional=populacionais.prop_racional,
                 n_secoes=populacionais.n_secoes,
                 n_candidatos=populacionais.n_candidatos,
-                candidato_alvo=populacionais.candidato_alvo,
+                candidato_alvo=candidato_alvo,
                 prob_conformidade=populacionais.prob_conformidade,
                 recompensa=0.0,
                 delta_t=params["delta_t"],
