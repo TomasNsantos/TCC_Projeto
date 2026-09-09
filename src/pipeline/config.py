@@ -110,16 +110,21 @@ class ParametrosPopulacionaisStub:
     sensibilidade (``5000``) continua sendo um override explícito no
     PONTO DE CHAMADA, não um segundo default aqui. ``eleitores_por_secao``
     também foi travado nessa reunião, ver docstring do campo abaixo.
-    ``n_candidatos`` e um ``n_secoes`` explícito fora do mecanismo de
-    ``eleitores_por_secao`` seguem stub v0, não calibrados, pendente de
+    ``n_candidatos`` foi travado numa reunião seguinte (Item 2, reunião
+    2026-09): ``5`` como valor principal de desenvolvimento (primeira
+    rodada) — a faixa 6–10 fica para exploração posterior, ao simular
+    sistemas proporcionais, se houver tempo; não implementada nesta
+    tarefa, só o default. Um ``n_secoes`` explícito fora do mecanismo de
+    ``eleitores_por_secao`` segue stub v0, não calibrado, pendente de
     consenso com orientadores (mesma linguagem geral de CLAUDE.md).
 
     A maioria dos defaults ainda espelha ``ElectionModel.__init__``
     (`src/generator/layer1_abm/model.py`) — não são uma segunda fonte de
-    verdade sobre o valor provisório, são a mesma — EXCETO ``n_agentes``:
-    aqui é ``500`` (travado pelo Item 1), enquanto o default de
-    ``ElectionModel`` permanece ``100`` (não alterado, fora do escopo
-    desta decisão) — divergência deliberada, não um descuido.
+    verdade sobre o valor provisório, são a mesma — EXCETO ``n_agentes``
+    e ``n_candidatos``: aqui são ``500``/``5`` (travados pelos Itens 1/2),
+    enquanto os defaults de ``ElectionModel`` permanecem ``100``/``1``
+    (não alterados, fora do escopo dessas decisões) — divergência
+    deliberada, não um descuido.
 
     Attributes
     ----------
@@ -170,7 +175,7 @@ class ParametrosPopulacionaisStub:
     alpha_beta: tuple[float, float] = (2.0, 2.0)
     prop_racional: float = 0.9
     n_secoes: int = _N_SECOES_DEFAULT
-    n_candidatos: int = 1
+    n_candidatos: int = 5
     candidato_alvo: int | None = 0
     prob_conformidade: float = 1.0
     eleitores_por_secao: int | None = None
