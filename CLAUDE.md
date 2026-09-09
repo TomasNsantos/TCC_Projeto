@@ -660,6 +660,47 @@ via Mesa), Camada 2 (estrutura de dependência via cópula Clayton, biblioteca
   não são dependências diretas do projeto (`pyarrow` aparece só como
   transitiva de outra lib já instalada; `.pkl` é nativo do pandas e
   preserva dtype exatamente).
+- **`ParametrosPopulacionaisStub.eleitores_por_secao` — forma preferencial
+  de derivar `n_secoes` de `n_agentes`, exclusiva do cenário de
+  sensibilidade.** `src/pipeline/config.py`. Aproximação de seções
+  eleitorais brasileiras reais (~300–400 eleitores/seção), decisão
+  confirmada com os orientadores (Item 1, reunião de 2026-09) — mas só
+  para uso no cenário de sensibilidade (`n_agentes=5000`); no cenário
+  principal (`n_agentes=500`), o campo fica em `None` e `n_secoes`
+  permanece fixo no default. Sem default diferente de `None` aqui
+  deliberadamente: o valor exato dentro de 300–400 é escolha do ponto de
+  chamada, não da dataclass — mesma disciplina de "quem chama decide o
+  valor" já usada para `taxa`/`volume_medio`/`tau_kendall`.
+
+  **Mecanismo:** quando setado, `__post_init__` recalcula
+  `n_secoes = math.ceil(n_agentes / eleitores_por_secao)` — mesmo padrão
+  de `math.ceil` (nunca `round()`/`floor()`) já usado em `ElectionModel`
+  para `n_municipios`/`n_estados`. `_N_SECOES_DEFAULT` (constante de
+  módulo, `5`, o valor que já era o default de `n_secoes` antes desta
+  tarefa) foi extraída especificamente para servir de referência única na
+  checagem de ambiguidade abaixo — não é uma segunda fonte de verdade
+  duplicada, é a MESMA constante usada como default do campo.
+
+  **Checagem de ambiguidade e sua limitação conhecida, aceita
+  deliberadamente:** se `eleitores_por_secao is not None` e
+  `n_secoes != _N_SECOES_DEFAULT`, `__post_init__` levanta `ValueError` —
+  os dois campos setados juntos de forma ambígua (qual deveria "vencer"?
+  não fica claro). **Limitação:** uma dataclass não distingue "`n_secoes`
+  passado explicitamente com o MESMO valor do default" de "`n_secoes` não
+  passado" — então `ParametrosPopulacionaisStub(n_secoes=_N_SECOES_DEFAULT,
+  eleitores_por_secao=350)` NÃO levanta erro, mesmo `n_secoes` tendo sido
+  passado explicitamente; `eleitores_por_secao` "vence" silenciosamente
+  nesse caso específico. Não contornado com um sentinel/`Optional` mais
+  complexo — aceito como limitação conhecida, documentada e testada
+  explicitamente (`test_eleitores_por_secao_com_n_secoes_explicito_igual_ao_default_nao_levanta_erro`,
+  `tests/test_pipeline_config.py`), para registrar que é comportamento
+  esperado, não um bug a "corrigir" numa tarefa futura sem essa
+  informação.
+
+  **`runner.py`/`geracao.py` não precisaram de nenhuma mudança:** os dois
+  só leem `populacionais.n_secoes` já resolvido (depois de
+  `__post_init__` já ter rodado) — o recálculo é inteiramente interno à
+  dataclass, transparente para o resto do pipeline.
 
 ## Estilo
 - Código Python com type hints

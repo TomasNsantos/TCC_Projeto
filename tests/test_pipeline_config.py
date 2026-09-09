@@ -10,6 +10,7 @@ from src.pipeline.config import (
     ParametrosPopulacionaisStub,
     ParametrosStubGeracao,
     RobustezBeta,
+    _N_SECOES_DEFAULT,
     derivar_seeds,
     expandir_grade,
     expandir_grade_robustez,
@@ -140,3 +141,41 @@ def test_parametros_populacionais_stub_candidato_alvo_aceita_none() -> None:
     assert populacionais.candidato_alvo is None
 
     assert ParametrosPopulacionaisStub().candidato_alvo == 0
+
+
+def test_eleitores_por_secao_none_nao_altera_n_secoes() -> None:
+    """Default (None) -- retrocompatibilidade estrita, n_secoes permanece
+    o que foi passado (ou o default), sem nenhum recalculo."""
+    populacionais_default = ParametrosPopulacionaisStub()
+    assert populacionais_default.eleitores_por_secao is None
+    assert populacionais_default.n_secoes == _N_SECOES_DEFAULT
+
+    populacionais_explicito = ParametrosPopulacionaisStub(n_secoes=12)
+    assert populacionais_explicito.n_secoes == 12
+
+
+def test_eleitores_por_secao_setado_recalcula_n_secoes_via_ceil() -> None:
+    """n_agentes nao divisivel exatamente por eleitores_por_secao, para
+    expor o arredondamento para cima (ceil, nunca round()/floor()) --
+    mesmo padrao ja usado em ElectionModel para n_municipios/n_estados."""
+    populacionais = ParametrosPopulacionaisStub(n_agentes=5000, eleitores_por_secao=350)
+
+    assert populacionais.n_secoes == 15  # ceil(5000 / 350) = ceil(14.285...) = 15
+
+
+def test_eleitores_por_secao_com_n_secoes_explicito_diferente_do_default_levanta_erro() -> None:
+    with pytest.raises(ValueError):
+        ParametrosPopulacionaisStub(n_secoes=10, eleitores_por_secao=350)
+
+
+def test_eleitores_por_secao_com_n_secoes_explicito_igual_ao_default_nao_levanta_erro() -> None:
+    """Limitacao conhecida e aceita: uma dataclass nao distingue "n_secoes
+    passado explicitamente com o MESMO valor do default" de "n_secoes nao
+    passado" -- a checagem de ambiguidade compara contra o literal
+    _N_SECOES_DEFAULT, entao esse caso especifico passa despercebido (nao
+    levanta erro), mesmo que n_secoes tenha sido setado explicitamente.
+    Documentado aqui deliberadamente, para registrar que e um comportamento
+    esperado, nao um bug a corrigir numa tarefa futura."""
+    populacionais = ParametrosPopulacionaisStub(n_agentes=5000, n_secoes=_N_SECOES_DEFAULT, eleitores_por_secao=350)
+
+    assert populacionais.n_secoes == 15  # eleitores_por_secao "venceu" silenciosamente

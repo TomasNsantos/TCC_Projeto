@@ -17,6 +17,7 @@ PLANO, não é uma escolha de implementação.
 from __future__ import annotations
 
 import itertools
+import math
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -26,6 +27,18 @@ N_JANELAS_POR_CLASSE_PADRAO: int = 1000
 valor nesta tarefa com lastro direto no PLANO; todo o resto em
 ``ParametrosPopulacionaisStub``/``ParametrosStubGeracao`` é stub v0 sem
 calibração (ver CLAUDE.md)."""
+
+_N_SECOES_DEFAULT: int = 5
+"""Default de ``ParametrosPopulacionaisStub.n_secoes`` — extraído como
+constante de módulo (não só um literal no default do campo) porque também
+serve de referência única para a checagem de ambiguidade em
+``eleitores_por_secao``: é o valor contra o qual ``__post_init__`` compara
+para decidir se ``n_secoes`` "foi deixado no default" ou "foi setado
+explicitamente". Uma dataclass não distingue "passado explicitamente com o
+mesmo valor do default" de "não passado" — comparar contra este literal é
+uma limitação conhecida e aceita (ver docstring de
+``ParametrosPopulacionaisStub``), não contornada com um sentinel/Optional
+mais complexo."""
 
 _CASAS_DECIMAIS_RUN_ID: int = 4
 """Casas decimais fixas usadas para formatar floats em ``run_id`` — garante
@@ -87,12 +100,26 @@ class GradeFatorial:
 
 @dataclass
 class ParametrosPopulacionaisStub:
-    """Parâmetros populacionais — stub v0, não calibrado, pendente de
-    consenso com orientadores (mesma linguagem de CLAUDE.md).
+    """Parâmetros populacionais.
 
-    Todos os defaults são copiados literalmente dos defaults de
-    ``ElectionModel.__init__`` (`src/generator/layer1_abm/model.py`) — não
-    são uma segunda fonte de verdade sobre o valor provisório, são a mesma.
+    ``n_agentes``, ``alpha_beta`` e ``prop_racional`` foram travados com
+    os orientadores (Item 1, reunião 2026-09): ``alpha_beta=(2.0, 2.0)`` e
+    ``prop_racional=0.9`` já coincidem com os defaults abaixo;
+    ``n_agentes=500`` (principal) / ``5000`` (sensibilidade) — o default
+    desta dataclass agora É ``500`` (cenário principal); o cenário de
+    sensibilidade (``5000``) continua sendo um override explícito no
+    PONTO DE CHAMADA, não um segundo default aqui. ``eleitores_por_secao``
+    também foi travado nessa reunião, ver docstring do campo abaixo.
+    ``n_candidatos`` e um ``n_secoes`` explícito fora do mecanismo de
+    ``eleitores_por_secao`` seguem stub v0, não calibrados, pendente de
+    consenso com orientadores (mesma linguagem geral de CLAUDE.md).
+
+    A maioria dos defaults ainda espelha ``ElectionModel.__init__``
+    (`src/generator/layer1_abm/model.py`) — não são uma segunda fonte de
+    verdade sobre o valor provisório, são a mesma — EXCETO ``n_agentes``:
+    aqui é ``500`` (travado pelo Item 1), enquanto o default de
+    ``ElectionModel`` permanece ``100`` (não alterado, fora do escopo
+    desta decisão) — divergência deliberada, não um descuido.
 
     Attributes
     ----------
@@ -109,15 +136,57 @@ class ParametrosPopulacionaisStub:
         nada até que o código consumidor (`geracao.py`) seja atualizado
         para reconhecer ``None`` e agir sobre ele. Default continua ``0``,
         idêntico ao de antes desta tarefa.
+    eleitores_por_secao : int | None
+        Forma PREFERENCIAL de configurar ``n_secoes`` de forma realista —
+        aproximação de seções eleitorais brasileiras (~300–400
+        eleitores/seção), decisão confirmada com os orientadores (Item 1,
+        reunião de 2026-09) para uso EXCLUSIVO no cenário de sensibilidade
+        (``n_agentes=5000``); no cenário principal (``n_agentes=500``),
+        este campo deve ser deixado em ``None`` e ``n_secoes`` permanece
+        fixo no valor default. Não hardcodado aqui como default diferente
+        de ``None`` — o valor exato dentro da faixa 300–400 é escolhido no
+        PONTO DE CHAMADA, não nesta dataclass. Quando setado (não
+        ``None``), recalcula ``n_secoes = ceil(n_agentes / eleitores_por_secao)``
+        em ``__post_init__`` (mesmo padrão de ``math.ceil`` já usado em
+        ``ElectionModel`` para ``n_municipios``/``n_estados`` — nunca
+        ``round()``/``floor()``). Mutuamente exclusivo com um ``n_secoes``
+        explícito diferente do default (``_N_SECOES_DEFAULT``): setar os
+        dois de forma ambígua (`n_secoes` explícito != default E
+        `eleitores_por_secao` setado) levanta ``ValueError`` em
+        ``__post_init__`` — ver `Raises` abaixo, e a limitação conhecida
+        documentada em `_N_SECOES_DEFAULT`. Um ``n_secoes`` explícito
+        continua válido para uso direto/testes onde o acoplamento com
+        ``n_agentes`` não é relevante.
+
+    Raises
+    ------
+    ValueError
+        Se ``eleitores_por_secao is not None`` e ``n_secoes !=
+        _N_SECOES_DEFAULT`` (os dois campos setados de forma ambígua —
+        ver `eleitores_por_secao` acima).
     """
 
-    n_agentes: int = 100
+    n_agentes: int = 500
     alpha_beta: tuple[float, float] = (2.0, 2.0)
     prop_racional: float = 0.9
-    n_secoes: int = 5
+    n_secoes: int = _N_SECOES_DEFAULT
     n_candidatos: int = 1
     candidato_alvo: int | None = 0
     prob_conformidade: float = 1.0
+    eleitores_por_secao: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.eleitores_por_secao is not None:
+            if self.n_secoes != _N_SECOES_DEFAULT:
+                raise ValueError(
+                    "n_secoes e eleitores_por_secao não podem ser setados simultaneamente de forma "
+                    f"ambígua: n_secoes={self.n_secoes!r} (diferente do default {_N_SECOES_DEFAULT!r}) "
+                    f"e eleitores_por_secao={self.eleitores_por_secao!r} foram passados juntos. "
+                    "Escolha um dos dois: deixe n_secoes no default para que eleitores_por_secao "
+                    "determine n_secoes, ou deixe eleitores_por_secao em None e configure n_secoes "
+                    "diretamente."
+                )
+            self.n_secoes = math.ceil(self.n_agentes / self.eleitores_por_secao)
 
 
 @dataclass
