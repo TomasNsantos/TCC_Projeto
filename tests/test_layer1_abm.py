@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from src.generator.layer1_abm import ElectionModel
+from src.generator.layer2_copula.copula import _JANELA_FRAGMENTACAO_FIXA
 
 
 def test_parametros_populacionais_sao_configuraveis() -> None:
@@ -476,10 +477,11 @@ def test_beta_maior_que_um_fragmenta_eventos_por_agente() -> None:
     for timestamp, unique_id in modelo.eventos_desembolso:
         timestamps_por_agente.setdefault(unique_id, []).append(timestamp)
 
-    janela_fragmento = modelo.delta_t / modelo.beta
+    # janela de fragmentação e FIXA (_JANELA_FRAGMENTACAO_FIXA), nao mais
+    # delta_t/beta -- ver CLAUDE.md e test_layer2_copula.py.
     for timestamps in timestamps_por_agente.values():
         assert len(timestamps) == 5
-        assert max(timestamps) - min(timestamps) < janela_fragmento
+        assert max(timestamps) - min(timestamps) < _JANELA_FRAGMENTACAO_FIXA
 
 
 def test_beta_nao_muda_volume_monetario_agregado() -> None:

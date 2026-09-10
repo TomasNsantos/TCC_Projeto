@@ -701,6 +701,77 @@ via Mesa), Camada 2 (estrutura de dependência via cópula Clayton, biblioteca
   só leem `populacionais.n_secoes` já resolvido (depois de
   `__post_init__` já ter rodado) — o recálculo é inteiramente interno à
   dataclass, transparente para o resto do pipeline.
+- **Janela de fragmentação de `aplicar_batching` — FIXA (12s, tempo de
+  bloco Ethereum pós-Merge), substituindo `delta_t/beta`.**
+  `src/generator/layer2_copula/copula.py`. Fecha a pendência já registrada
+  na entrada "Redução de amplitude por β não é monotônica — achado
+  documentado, não corrigido" (acima): aquela entrada identificou que a
+  fórmula `delta_t/beta` fazia a janela ENCOLHER conforme β crescia,
+  produzindo amplitude de pico em formato de V em vez de degradação
+  monotônica, e listava "mudar a fórmula da janela de fragmentação...
+  decisão que envolve o Prof. Alexandre" como uma das duas saídas
+  possíveis, nenhuma escolhida até então. **Decisão tomada na reunião de
+  orientadores (2026-09):** janela fixa, independente de β e de `delta_t`.
+
+  **Calibração:** `_JANELA_FRAGMENTACAO_FIXA = 12 / 3600 ≈ 0.00333`
+  timesteps — 12 segundos é o tempo de bloco/slot do Ethereum pós-Merge
+  sob Proof-of-Stake (determinístico por slot, especificação oficial do
+  protocolo), convertido para a unidade já fixada no gerador (1 timestep
+  = 1 hora, ver docstring de `delta_t` em `ElectionModel`). `delta_t`
+  continua parâmetro obrigatório de `aplicar_batching` (usado como offset
+  — os timestamps originais, que já vivem em `[0, delta_t]`, seguem sendo
+  a base sobre a qual os sub-eventos são amostrados), mas deixa de
+  determinar a LARGURA da janela; `beta` continua determinando quantos
+  sub-eventos, não mais a largura.
+
+  **Granularidade de bucketização (1 timestep = 1 hora) permanece
+  inalterada — a correção opera em outra camada.** Esta mudança atua
+  sobre o timestamp CONTÍNUO, antes da bucketização
+  (`int(np.floor(t))` em `fonte_a_eventos_fronteira`/
+  `gerar_fonte_a_normal`) — não afeta o schema do HDF5 (coluna
+  `timestep`, inteiro, continua exatamente como antes). As duas
+  granularidades (bucketização em hora vs. janela de fragmentação em
+  frações de hora) são conceitos independentes, só compartilhavam a
+  mesma unidade de medida (timestep) por convenção, nunca a mesma escala
+  numérica.
+
+  **Sanity Check 3 (PLANO §5.2.3) NÃO precisa ser reformulado — a
+  correção ataca a causa raiz, não o critério de validação.** A entrada
+  anterior listava "reformular o critério do Sanity Check 3" como a
+  OUTRA saída possível (opção b, não escolhida); com a fórmula corrigida
+  na origem, essa alternativa fica sem necessidade — a expectativa
+  original do PLANO (degradação monotônica do F1 conforme β aumenta)
+  permanece a hipótese válida a testar, não descartada nem substituída.
+  Ainda não pode ser verificada (depende do detector/M1-M2-M3, que não
+  existem) — fica como reverificação pendente para quando esses módulos
+  existirem, não uma validação nova requerida por esta mudança.
+
+  **Testes atualizados, não só ajustados:**
+  `tests/test_layer2_copula.py::test_batching_fragmenta_em_beta_sub_eventos_na_janela_delta_t_beta`
+  testava a fórmula antiga DIRETAMENTE na própria asserção (usava
+  `delta_t/beta` para calcular os limites esperados da janela) — renomeado
+  para `test_batching_fragmenta_em_beta_sub_eventos_na_janela_fixa` e
+  reescrito para checar contra `_JANELA_FRAGMENTACAO_FIXA`, importada de
+  `copula.py` (não reexportada no `__init__.py` do pacote — é privada por
+  convenção, então os testes importam direto do módulo).
+  `tests/test_layer1_abm.py::test_beta_maior_que_um_fragmenta_eventos_por_agente`
+  calculava `janela_fragmento = modelo.delta_t / modelo.beta` como limite
+  da asserção — continuaria "passando" sem alteração (a nova janela é
+  numericamente menor, `0.00333 < 10.0`), mas testando um valor sem
+  significado; corrigido para comparar contra a mesma constante importada,
+  em vez de deixar um teste que passa por acidente. Nenhum outro teste de
+  β/batching dependia da fórmula (confirmado por leitura antes de editar).
+
+  **Pendência não resolvida nesta tarefa, sinalizada para decisão
+  futura:** a docstring do parâmetro `beta` em `ElectionModel` ainda
+  descreve o efeito como "reduzindo a amplitude do pico observável em
+  Fonte A por fator `1/β`" — essa é uma afirmação sobre o EFEITO
+  (consequência da fórmula antiga), não sobre a fórmula em si; não foi
+  alterada aqui porque o efeito real pós-correção (a janela fixa restaura
+  monotonicidade? em que medida?) ainda não foi validado numericamente. O
+  notebook `validacao_visual_batching_granularidade_visao_geral.ipynb`
+  também fica com números desatualizados (picos/`janela_fragmento`
+  impressos refletem a fórmula antiga) — não regenerado nesta tarefa.
 
 ## Estilo
 - Código Python com type hints

@@ -8,8 +8,9 @@ Clayton (e não Gumbel) porque a Fonte B não tem dimensão de magnitude: o úni
 eixo de dependência coerente é proximidade temporal (cauda inferior — valores
 pequenos de tempo-até-evento coocorrendo), não magnitude conjunta grande
 (cauda superior). O batching reforça esse argumento: β reduz a amplitude dos
-picos mas comprime o agrupamento temporal em [0, Δt/β], preservando o sinal de
-proximidade temporal mesmo sob evasão adversarial.
+picos mas comprime o agrupamento temporal numa janela fixa a partir do
+timestamp original, preservando o sinal de proximidade temporal mesmo sob
+evasão adversarial (ver ``_JANELA_FRAGMENTACAO_FIXA``/``aplicar_batching``).
 """
 
 from __future__ import annotations
@@ -18,6 +19,28 @@ import numpy as np
 from copulas.bivariate.clayton import Clayton
 
 RandomState = int | np.random.Generator | None
+
+_JANELA_FRAGMENTACAO_FIXA: float = 12 / 3600
+"""Largura fixa da janela de fragmentação de ``aplicar_batching``, em
+timesteps (1 timestep = 1 hora, ver docstring de ``delta_t`` em
+``ElectionModel``) — ``12/3600 ≈ 0.00333`` timesteps.
+
+12 segundos = tempo de bloco/slot do Ethereum pós-Merge sob Proof-of-Stake
+(determinístico por slot, especificação oficial do protocolo) — referência
+de tempo real de rede escolhida pelos orientadores (reunião 2026-09) para
+calibrar a granularidade de evasão do adversário, substituindo a fórmula
+anterior ``delta_t/beta``. A fórmula anterior fazia a janela ENCOLHER
+conforme β crescia, produzindo amplitude de pico não-monotônica em β (achado
+documentado em CLAUDE.md) — a janela fixa, por não depender de β nem de
+delta_t, remove essa causa raiz sem alterar o critério de validação do
+Sanity Check 3 (degradação monotônica do F1 conforme β aumenta continua
+sendo a expectativa, a reverificar quando o detector existir).
+
+Não confundir com a granularidade de bucketização de Fonte A (1 timestep =
+1 hora, ``int(np.floor(t))`` em ``fonte_a_eventos_fronteira``/
+``gerar_fonte_a_normal``) — esta constante opera sobre o timestamp
+CONTÍNUO, antes da bucketização; o schema do HDF5 (coluna ``timestep``,
+inteiro) não é afetado por esta mudança."""
 
 
 def _pseudo_observacoes(timestamps: np.ndarray, janela: float) -> np.ndarray:
@@ -90,22 +113,33 @@ def aplicar_batching(
     beta: int,
     random_state: RandomState = None,
 ) -> np.ndarray:
-    r"""Fragmenta eventos de Fonte A em β saques distribuídos em [0, Δt/β].
+    r"""Fragmenta eventos de Fonte A em β saques distribuídos numa janela fixa.
 
     Estratégia de evasão do adversário: em vez de um único evento, fragmenta
     em β sub-eventos, reduzindo a amplitude do pico observável por fator 1/β
-    e comprimindo o agrupamento temporal na janela [0, Δt/β] a partir do
-    timestamp original.
+    e comprimindo o agrupamento temporal na janela
+    ``[0, _JANELA_FRAGMENTACAO_FIXA]`` a partir do timestamp original — largura
+    FIXA, independente de β e de ``delta_t`` (ver docstring de
+    ``_JANELA_FRAGMENTACAO_FIXA`` para a calibração em 12s/tempo de bloco
+    Ethereum pós-Merge e o motivo da mudança em relação à fórmula anterior
+    ``delta_t/beta``, que fazia a janela encolher conforme β crescia).
 
     Parameters
     ----------
     timestamps : np.ndarray
         Timestamps originais dos eventos de Fonte A (não fragmentados, β=1).
     delta_t : float
-        Atraso de divulgação eleitoral (Δt) — define a escala da janela de
-        fragmentação.
+        Atraso de divulgação eleitoral (Δt) — mantido como parâmetro
+        obrigatório por compatibilidade de assinatura com o resto do
+        pipeline (`ElectionModel.resolver_desembolso`), mas NÃO determina
+        mais a largura da janela de fragmentação (ver
+        ``_JANELA_FRAGMENTACAO_FIXA``) — os timestamps originais (que já
+        vivem em ``[0, delta_t]``, amostrados por
+        ``_amostrar_timestamps_desembolso``) são usados como offset base
+        dos sub-eventos, não `delta_t` em si.
     beta : int
-        Número de saques fragmentados por evento original.
+        Número de saques fragmentados por evento original — determina
+        quantos sub-eventos, não mais a largura da janela em que caem.
     random_state : int | np.random.Generator | None
         Semente para reprodutibilidade.
 
@@ -120,7 +154,6 @@ def aplicar_batching(
     if timestamps.size == 0 or beta <= 1:
         return timestamps
 
-    janela_fragmento = delta_t / beta
-    offsets = rng.uniform(0, janela_fragmento, size=(timestamps.size, beta))
+    offsets = rng.uniform(0, _JANELA_FRAGMENTACAO_FIXA, size=(timestamps.size, beta))
     fragmentados = timestamps[:, None] + offsets
     return fragmentados.ravel()

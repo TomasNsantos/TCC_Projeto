@@ -91,7 +91,10 @@ def gerar_cenario_normal(
         critério de quem constrói o modelo — esta função não os duplica.
     janela : float
         Duração da janela de observação de Fonte A/B (independente de
-        ``modelo_eleicao.n_steps``, que rege só a campanha de adesão).
+        ``modelo_eleicao.n_steps``, que rege só a campanha de adesão) —
+        mesma unidade de ``ElectionModel.delta_t`` (1 timestep = 1 hora,
+        PLANO §5.2.2: ``Δt ∈ {0h, 2h, 24h}``), tipicamente passada como o
+        próprio ``delta_t`` do cenário (ver ``src/pipeline/geracao.py``).
     taxa_fonte_a, volume_medio_fonte_a, taxa_fonte_b : float
         Parâmetros de ``gerar_fonte_a_normal``/``gerar_fonte_b_normal`` —
         suposições v0 sem valor calibrado, ver docstring de ``trafego.py``.

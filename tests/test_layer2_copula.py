@@ -7,6 +7,7 @@ import pytest
 from scipy.stats import kendalltau
 
 from src.generator.layer2_copula import aplicar_batching, gerar_fonte_b
+from src.generator.layer2_copula.copula import _JANELA_FRAGMENTACAO_FIXA
 
 JANELA = 100.0
 
@@ -73,7 +74,12 @@ def test_fonte_b_respeita_janela_de_observacao() -> None:
     assert fonte_b.max() <= JANELA
 
 
-def test_batching_fragmenta_em_beta_sub_eventos_na_janela_delta_t_beta() -> None:
+def test_batching_fragmenta_em_beta_sub_eventos_na_janela_fixa() -> None:
+    """Janela de fragmentação é FIXA (_JANELA_FRAGMENTACAO_FIXA, calibrada
+    em 12s/tempo de bloco Ethereum pós-Merge), independente de delta_t e
+    de beta -- substitui a fórmula anterior delta_t/beta (que fazia a
+    janela encolher conforme beta crescia, causando não-monotonicidade na
+    amplitude do pico observável, ver CLAUDE.md)."""
     timestamps = np.array([10.0, 20.0, 30.0])
     delta_t = 10.0
     beta = 5
@@ -82,7 +88,7 @@ def test_batching_fragmenta_em_beta_sub_eventos_na_janela_delta_t_beta() -> None
 
     assert fragmentados.size == timestamps.size * beta
     for original in timestamps:
-        janela = fragmentados[(fragmentados >= original) & (fragmentados < original + delta_t / beta)]
+        janela = fragmentados[(fragmentados >= original) & (fragmentados < original + _JANELA_FRAGMENTACAO_FIXA)]
         assert janela.size == beta
 
 

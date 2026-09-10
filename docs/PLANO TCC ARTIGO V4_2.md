@@ -1,4 +1,4 @@
-# PLANO TCC/ARTIGO V4.1
+# PLANO TCC/ARTIGO V4.2
 
 # Detecção de Incentivos Econômicos Adversariais em Eleições via Smart Contracts com Privacidade Nativa
 
@@ -6,6 +6,8 @@
 > 
 > 
 > *Changelog v4.1:* Mesa removido de OE3, C3, §5.2.2 e cronograma; McNemar corrigido ("três quartos ≥ 3/4"); nota de Fontes derivadas em §5.4.1; nota GPU (M3) em §5.3.2; nota parâmetros ABM em §5.2.2; alerta de datas no cronograma.
+> 
+> *Changelog v4.2:*"V4_2: janela de fragmentação β corrigida para valor fixo ancorado em Ethereum, substituindo Δt/β — ver §5.2.2”
 > 
 
 ## Integração de Fontes Heterogêneas Indiretas sob Observabilidade Limitada
@@ -177,7 +179,7 @@ Modo adversarial:
   - Ativações da Fonte B: correlacionadas com divulgação via cópula Clayton
   - Dados da Fonte C: resultado eleitoral emergente da simulação
   - Estrutura de dependência A↔B: τ_Kendall > 0.4 no modo adversarial
-  - Fragmentação: β saques por evento, distribuídos em janela de [0, Δt/β]
+  - Fragmentação: β saques por evento, distribuídos em janela fixa de [0, W], independente de β e de Δt — W calibrado no tempo médio de bloco da rede Ethereum sob Proof-of-Stake (~12 segundos, documentação oficial do protocolo pós-Merge), convertido para a unidade de timestep do gerador (1 timestep = 1 hora): W ≈ 0,0033 timesteps. Substitui a formulação original Δt/β, descartada após identificação de não-monotonicidade na amplitude do pico observável de Fonte A em função de β (decisão registrada em reunião com orientadores, set/2026).
 
 Modo normal (baseline):
   - Processos de Poisson independentes para A e B

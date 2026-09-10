@@ -125,9 +125,11 @@ class ElectionModel(mesa.Model):
         ``granularidade != "pool"``. Obrigatório nesse caso (``ValueError``
         se ``None``); ignorado quando ``granularidade == "pool"``.
     delta_t : float
-        Duração da janela pós-resultado em que o desembolso ocorre (mesma
-        grandeza do Δt do design fatorial; em unidades de timestep por
-        enquanto).
+        Duração da janela pós-resultado em que o desembolso ocorre — mesma
+        grandeza do Δt do design fatorial (PLANO §5.2.2:
+        ``Δt ∈ {0h, 2h, 24h}``). 1 timestep = 1 hora: a unidade de
+        ``delta_t`` (e de qualquer timestamp/timestep derivado dela) é
+        hora, não um placeholder abstrato.
     rho : float
         Grau de coordenação (ρ), em ``[0, 1]``. Controla a concentração
         temporal dos eventos de desembolso (Fase 2) dentro de
