@@ -7,7 +7,7 @@ import pytest
 from scipy.stats import kendalltau
 
 from src.generator.layer2_copula import aplicar_batching, gerar_fonte_b
-from src.generator.layer2_copula.copula import _JANELA_FRAGMENTACAO_FIXA
+from src.generator.layer2_copula.copula import _JANELA_FRAGMENTACAO_FIXA, _pseudo_observacoes
 
 JANELA = 100.0
 
@@ -72,6 +72,25 @@ def test_fonte_b_respeita_janela_de_observacao() -> None:
 
     assert fonte_b.min() >= 0
     assert fonte_b.max() <= JANELA
+
+
+def test_janela_zero_retorna_fonte_a_sem_chamar_copula() -> None:
+    """Janela=0 (ex. delta_t=0h, PLANO Sec.5.2.2) -- massa pontual, sem
+    variacao para medir tau_Kendall. Fonte B = copia de Fonte A, sem NaN
+    (achado/correcao: ver CLAUDE.md, 0/0 na normalizacao antiga)."""
+    fonte_a = np.array([0.0, 0.0, 0.0, 0.0])
+
+    fonte_b = gerar_fonte_b(fonte_a, janela=0.0, tau_kendall=0.6, random_state=1)
+
+    assert np.array_equal(fonte_b, fonte_a)
+    assert not np.isnan(fonte_b).any()
+
+
+def test_pseudo_observacoes_com_janela_zero_levanta_erro() -> None:
+    """Guarda defensiva isolada -- protege qualquer chamador futuro que
+    nao trate janela<=0 antes de chegar aqui (ver gerar_fonte_b)."""
+    with pytest.raises(ValueError):
+        _pseudo_observacoes(np.array([0.0, 1.0]), janela=0.0)
 
 
 def test_batching_fragmenta_em_beta_sub_eventos_na_janela_fixa() -> None:

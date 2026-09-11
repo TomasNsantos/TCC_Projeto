@@ -848,6 +848,64 @@ via Mesa), Camada 2 (estrutura de dependência via cópula Clayton, biblioteca
   reintroduz o teste do zero. As outras 5 fixtures (`fonte_b`,
   `fonte_c_*`, `metadados_janela`) não foram tocadas — fora do escopo desta
   mudança.
+- **Bug corrigido — `delta_t=0.0` corrompia Fonte B com `NaN` silencioso;
+  Fonte B = Fonte A quando `janela<=0`.** `src/generator/layer2_copula/copula.py`
+  (`gerar_fonte_b`, `_pseudo_observacoes`). **Achado:** durante a geração
+  de um dataset de validação de pipeline (não o dataset final), 22% dos
+  arquivos HDF5 (60/270) — todos com `delta_t=0.0` (nível legítimo do
+  design fatorial, PLANO §5.2.2, `Δt ∈ {0h, 2h, 24h}`) e contrato ativado
+  — saíram com a coluna `fonte_b.timestamp` inteiramente `NaN`.
+
+  **Causa raiz:** com `delta_t=0.0`, `_amostrar_timestamps_desembolso`
+  (`layer1_abm/model.py`) produz timestamps todos exatamente `0.0` (não
+  vazio — `rng.uniform(0,0,...)`/`rng.normal(loc,scale=0,...)` são casos
+  degenerados válidos do NumPy, sem erro nem warning). `gerar_cenario_adversarial`
+  repassa `janela=modelo_eleicao.delta_t=0.0` para `gerar_fonte_b`. Se
+  `tau_kendall != 0` (o caso relevante — coordenação adversarial),
+  `_pseudo_observacoes` calculava `timestamps/janela = 0.0/0.0 = NaN` —
+  o `np.clip` seguinte NÃO filtra `NaN` (falha as duas comparações do
+  clip, atravessa sem alteração) — corrompendo toda a coluna, propagado
+  através de `Clayton.percent_point` e do `u_b * janela` final.
+  **Assimetria encontrada entre classes:** a classe negativa (modo
+  normal), alimentada pelo MESMO `delta_t=0.0` via `janela=` em
+  `gerar_cenario_normal`, já degradava graciosamente para Fonte A/B
+  vazias — `gerar_fonte_a_normal`/`gerar_fonte_b_normal`
+  (`normal_mode/trafego.py`) fazem `rng.poisson(taxa * janela)`, e
+  `Poisson(0)` sempre retorna `0`, caindo num early-return já existente
+  (`if n_total == 0: return <vazio>`) — proteção acidental, não desenhada
+  para este caso especificamente, já que `normal_mode` nunca chama a
+  cópula. Só a classe positiva (via `_pseudo_observacoes`) não tinha
+  proteção equivalente.
+
+  **Decisão de correção — fundamentação matemática, não escolha
+  arbitrária de negócio:** com `janela<=0`, todos os timestamps de Fonte
+  A coincidem no mesmo instante — massa pontual, sem variância. τ_Kendall
+  (estatística de postos) não é estatisticamente definível nesse caso —
+  não há variação para medir dependência entre Fonte A e Fonte B.
+  `gerar_fonte_b` agora retorna `fonte_a_timestamps.copy()` quando
+  `janela<=0` (antes de qualquer chamada à cópula Clayton) — é a única
+  leitura matematicamente consistente de "sem janela de observação", não
+  uma convenção escolhida entre alternativas equivalentes. Documentado no
+  docstring da função.
+
+  **Defesa em profundidade:** `_pseudo_observacoes` agora levanta
+  `ValueError` explícito se `janela<=0`, em vez de permitir `0/0=NaN`
+  silencioso — não deveria disparar no fluxo normal (o early-return de
+  `gerar_fonte_b` intercepta antes), mas protege qualquer chamador futuro
+  que reintroduza o mesmo bug.
+
+  **Pesquisa no PLANO, sem resposta encontrada:** não há, em
+  `docs/PLANO TCC ARTIGO V4_2.md` nem em `docs/adversary_model_draft.tex`,
+  nenhuma prosa descrevendo o comportamento esperado de Fonte A/B quando
+  Δt=0h — só a lista do design fatorial (`Δt ∈ {0h, 2h, 24h}`, PLANO
+  linha 194). A interpretação usada na correção (massa pontual → Fonte B
+  = Fonte A) é inferência da fundamentação matemática do problema, não
+  algo já especificado no projeto — registrado aqui para o caso de essa
+  leitura precisar ser revisitada com os orientadores no futuro.
+
+  **Fora do escopo desta correção:** nenhuma mudança em Item 5 (λ/taxa/
+  volume não calibrados), Item 6 (ρ/prop_racional na utilidade do
+  adversário), ou qualquer outra pendência já registrada acima.
 
 ## Estilo
 - Código Python com type hints

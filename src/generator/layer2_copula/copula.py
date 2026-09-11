@@ -44,7 +44,20 @@ inteiro) não é afetado por esta mudança."""
 
 
 def _pseudo_observacoes(timestamps: np.ndarray, janela: float) -> np.ndarray:
-    """Normaliza timestamps para (0, 1) dentro da janela de observação."""
+    """Normaliza timestamps para (0, 1) dentro da janela de observação.
+
+    Levanta ``ValueError`` se ``janela <= 0`` — ``timestamps / janela``
+    com ``janela == 0`` produz ``NaN`` silencioso (``0/0``), que o
+    ``np.clip`` seguinte NÃO filtra (``NaN`` falha as duas comparações do
+    clip e atravessa sem alteração). Defesa em profundidade: o chamador
+    (``gerar_fonte_b``) já trata ``janela <= 0`` antes de chegar aqui —
+    este guard protege qualquer caminho futuro que esqueça de fazer o
+    mesmo, não deveria disparar no fluxo normal.
+    """
+    if janela <= 0:
+        raise ValueError(
+            "janela de observação não pode ser <= 0 — chamador deveria ter tratado esse caso antes de chegar aqui."
+        )
     u = np.asarray(timestamps, dtype=float) / janela
     return np.clip(u, 1e-9, 1 - 1e-9)
 
@@ -66,6 +79,20 @@ def gerar_fonte_b(
     A conversão τ → θ usa a forma fechada da própria cópula Clayton
     (``compute_theta``, θ = 2τ/(1-τ)), sem necessidade de fitar a partir de
     dados brutos.
+
+    **Caso degenerado — ``janela <= 0`` (ex. Δt=0h, PLANO §5.2.2,
+    ``Δt ∈ {0h, 2h, 24h}``): Fonte B = cópia de Fonte A, cópula não é
+    chamada.** Com janela de largura zero, todos os timestamps de Fonte A
+    coincidem no mesmo instante — massa pontual sem variância. τ_Kendall
+    (medida de dependência baseada em postos) não é estatisticamente
+    definível nesse caso — não há variação para medir correlação entre A
+    e B. Retornar Fonte B idêntica a Fonte A é a única leitura
+    matematicamente consistente de "sem janela de observação": não é uma
+    escolha arbitrária de negócio, é a ausência de qualquer alternativa
+    bem definida (achado: sem esse tratamento, ``_pseudo_observacoes``
+    calcula ``0/0 = NaN``, corrompendo toda a coluna — visto empiricamente
+    em 22% dos arquivos de uma rodada de validação de pipeline com
+    ``delta_t=0.0`` e contrato ativado; ver CLAUDE.md).
 
     Parameters
     ----------
@@ -91,6 +118,11 @@ def gerar_fonte_b(
 
     if not 0 <= tau_kendall < 1:
         raise ValueError("tau_kendall deve estar em [0, 1) — Clayton só modela dependência positiva.")
+
+    if janela <= 0:
+        # Massa pontual (todos os timestamps coincidem) -- tau_Kendall
+        # indefinido, sem variação para medir dependência. Fonte B = Fonte A.
+        return fonte_a_timestamps.copy()
 
     if tau_kendall == 0:
         # Modo normal: Fonte B é um processo de Poisson independente de A.

@@ -55,6 +55,34 @@ def test_contrato_ativa_formato_e_tamanho_compativel_com_beta() -> None:
     assert cenario.fonte_b.size == len(modelo.eventos_desembolso)
 
 
+def test_delta_t_zero_com_contrato_ativado_nao_produz_nan() -> None:
+    """delta_t=0.0 (nivel legitimo do design fatorial, PLANO Sec.5.2.2,
+    Δt em {0h, 2h, 24h}) faz todos os timestamps de desembolso
+    coincidirem em t=0 -- massa pontual, tau_Kendall indefinido. Fonte B
+    deve ser identica a Fonte A (timestamps brutos), sem NaN -- achado/
+    correcao registrada em CLAUDE.md (bug encontrado ao gerar dataset de
+    validacao de pipeline: 22% dos arquivos com delta_t=0.0 e contrato
+    ativo saiam com fonte_b inteiramente NaN antes desta correcao)."""
+    modelo = ElectionModel(
+        n_agentes=500,
+        n_candidatos=5,
+        recompensa=1.0,
+        delta_t=0.0,
+        rho=0.0,
+        pi=0.0,
+        seed=1,
+    )
+
+    cenario = gerar_cenario_adversarial(modelo, tau_kendall=0.6, random_state_fonte_b=2)
+
+    assert cenario.contrato_ativado is True
+    assert cenario.fonte_b.size > 0
+    assert not np.isnan(cenario.fonte_b).any()
+
+    timestamps_a = np.array([t for t, _ in modelo.eventos_desembolso])
+    assert np.array_equal(cenario.fonte_b, timestamps_a)
+
+
 def test_modelo_ja_executado_levanta_erro() -> None:
     modelo = ElectionModel(n_agentes=50, resultado_alvo=0.0, seed=1)
     modelo.run()
