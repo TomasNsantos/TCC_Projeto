@@ -20,13 +20,15 @@ def test_calcular_split_fronteiras(window_id: int, esperado: str) -> None:
 
 
 def _fonte_a_df(rows: list[list[float]]) -> pd.DataFrame:
-    return pd.DataFrame(rows, columns=["timestep", "n_eventos", "volume"])
+    return pd.DataFrame(
+        rows, columns=["timestep", "n_eventos", "volume", "timestamp_medio", "dispersao_timestamp"]
+    )
 
 
 @pytest.fixture
 def cenario_positivo_ativo() -> CenarioAdversarial:
     return CenarioAdversarial(
-        fonte_a=_fonte_a_df([[1, 2, 20.0]]),
+        fonte_a=_fonte_a_df([[1, 2, 20.0, 1.5, 0.3]]),
         fonte_b=np.array([1.5, 2.5]),
         resultado_por_secao=pd.Series([0.6, 0.7]),
         resultado_por_municipio=pd.Series([0.65]),
@@ -50,7 +52,7 @@ def cenario_positivo_inativo() -> CenarioAdversarial:
 @pytest.fixture
 def cenario_negativo() -> CenarioNormal:
     return CenarioNormal(
-        fonte_a=_fonte_a_df([[1, 1, 5.0]]),
+        fonte_a=_fonte_a_df([[1, 1, 5.0, 1.0, 0.0]]),
         fonte_b=np.array([3.0]),
         resultado_por_secao=pd.Series([0.3, 0.3]),
         resultado_por_municipio=pd.Series([0.3]),
@@ -72,7 +74,16 @@ def test_escrever_run_hdf5_cria_seis_tabelas_com_linhas_esperadas(
 
     fonte_a = pd.read_hdf(caminho, "fonte_a")
     assert len(fonte_a) == 2  # 1 linha da janela positiva ativa + 1 da negativa; a positiva inativa nao contribui
-    assert set(fonte_a.columns) == {"window_id", "classe", "split", "timestep", "n_eventos", "volume"}
+    assert set(fonte_a.columns) == {
+        "window_id",
+        "classe",
+        "split",
+        "timestep",
+        "n_eventos",
+        "volume",
+        "timestamp_medio",
+        "dispersao_timestamp",
+    }
 
     fonte_b = pd.read_hdf(caminho, "fonte_b")
     assert len(fonte_b) == 3  # 2 eventos da positiva ativa + 1 da negativa

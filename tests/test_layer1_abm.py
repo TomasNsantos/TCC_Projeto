@@ -101,7 +101,13 @@ def test_fonte_a_eventos_fronteira_agrega_desembolso_por_timestep() -> None:
 
     fonte_a = model.fonte_a_eventos_fronteira()
 
-    assert list(fonte_a.columns) == ["timestep", "n_eventos", "volume"]
+    assert list(fonte_a.columns) == [
+        "timestep",
+        "n_eventos",
+        "volume",
+        "timestamp_medio",
+        "dispersao_timestamp",
+    ]
     assert fonte_a["n_eventos"].sum() == len(model.eventos_desembolso)
     assert (fonte_a["n_eventos"] > 0).all()
     assert (fonte_a["volume"] == fonte_a["n_eventos"] * model.recompensa).all()
@@ -507,6 +513,29 @@ def test_beta_nao_muda_volume_monetario_agregado() -> None:
     assert volume_beta1 == pytest.approx(volume_beta5)
 
 
+def test_timestamp_medio_e_dispersao_timestamp_consistentes_com_timestep() -> None:
+    """timestamp_medio/dispersao_timestamp preservam o sinal contínuo
+    (pré-bucketização) descartado por int(np.floor(t)) -- ver CLAUDE.md."""
+    modelo = ElectionModel(
+        n_agentes=200,
+        prop_racional=1.0,
+        recompensa=10.0,
+        threshold_range=(0.0, 0.3),
+        resultado_alvo=0.0,
+        delta_t=50.0,
+        beta=5,
+        seed=7,
+    )
+    modelo.run()
+    modelo.resolver_desembolso()
+
+    fonte_a = modelo.fonte_a_eventos_fronteira()
+
+    assert len(fonte_a) == len(fonte_a["timestep"])
+    assert (np.floor(fonte_a["timestamp_medio"]).astype(int) == fonte_a["timestep"]).all()
+    assert (fonte_a.loc[fonte_a["n_eventos"] == 1, "dispersao_timestamp"] == 0.0).all()
+
+
 def test_beta_invalido_levanta_erro() -> None:
     with pytest.raises(ValueError):
         ElectionModel(beta=0)
@@ -549,7 +578,13 @@ def test_pi_um_mascara_todos_os_eventos() -> None:
 
     fonte_a = modelo.fonte_a_eventos_fronteira(random_state_pi=1)
     assert len(fonte_a) == 0
-    assert list(fonte_a.columns) == ["timestep", "n_eventos", "volume"]
+    assert list(fonte_a.columns) == [
+        "timestep",
+        "n_eventos",
+        "volume",
+        "timestamp_medio",
+        "dispersao_timestamp",
+    ]
 
 
 def test_pi_intermediario_reduz_numero_de_eventos_observados() -> None:

@@ -772,6 +772,82 @@ via Mesa), Camada 2 (estrutura de dependência via cópula Clayton, biblioteca
   notebook `validacao_visual_batching_granularidade_visao_geral.ipynb`
   também fica com números desatualizados (picos/`janela_fragmento`
   impressos refletem a fórmula antiga) — não regenerado nesta tarefa.
+- **`timestamp_medio`/`dispersao_timestamp` — timestamp contínuo (pré-bucketização)
+  de Fonte A preservado no HDF5, colunas adicionais, schema aditivo.**
+  `src/pipeline/storage.py` (`_DTYPES_FONTE_A`), `src/generator/layer1_abm/model.py`
+  (`fonte_a_eventos_fronteira`) e `src/generator/normal_mode/trafego.py`
+  (`gerar_fonte_a_normal`). Motivação: `timestep` (bucket de 1 hora) já
+  descartava, por `int(np.floor(t))`, qualquer timestamp contínuo antes de
+  chegar ao HDF5 — tornando estruturalmente impossível, no dado persistido,
+  observar qualquer efeito em escala de segundos (ex. a janela fixa de
+  `aplicar_batching`/`_JANELA_FRAGMENTACAO_FIXA`, entrada acima) dentro de
+  uma mesma hora. Mudança aditiva, sem alterar nenhum dos 6 eixos do design
+  fatorial (π, g, Δt, λ, ρ, β) nem a coluna `timestep`/sua granularidade de
+  bucketização — decisão defensável por si só, sem necessidade de aprovação
+  dos orientadores (ao contrário da janela fixa acima, que mexia num
+  mecanismo do adversary model). Aplicada às duas classes (positiva e
+  negativa) por simetria — nenhuma política de schema/custo em `storage.py`
+  desaconselhava isso (`_linhas_fonte_a` só copia `cenario.fonte_a` inteiro
+  via `.copy()`, sem seleção de colunas por classe; custo de um `float64` a
+  mais por linha é desprezível frente ao HDF5 total).
+
+  **Mecanismo — duas colunas, não uma, calculadas por `groupby(timesteps)`
+  sobre os timestamps contínuos (mesmo padrão já usado para
+  `volume_por_timestep`, `trafego.py`):** `timestamp_medio` (média por
+  bucket — satisfaz `int(np.floor(timestamp_medio)) == timestep` sempre,
+  verificado em teste) e `dispersao_timestamp` (desvio-padrão POPULACIONAL,
+  `ddof=0`, não o default do pandas — `ddof=1` produziria `NaN`, não `0.0`,
+  para um bucket de um único evento; `ddof=0` dá exatamente `0.0`,
+  verificado em teste). Refinamento feito em conjunto com o usuário durante
+  o planejamento: uma única coluna agregada (média ou mínimo) mediria só
+  tendência central — o efeito de β está na DISPERSÃO dos sub-eventos
+  dentro do bucket, não na sua posição.
+
+  **Achado central, com destaque — `dispersao_timestamp`, do jeito
+  implementado, NÃO resolve o problema que motivou o pedido; não confundir
+  "a coluna existe" com "o problema foi resolvido":** verificado
+  empiricamente com a mesma configuração `kwargs_batching` do notebook
+  `batching_janela_fixa.ipynb` (300 agentes, `rho=1.0`, `delta_t=50.0`) que
+  `dispersao_timestamp` MÉDIA por bucket é praticamente idêntica entre β=1
+  (`0.231287`) e β=20 (`0.231684`). Causa: com múltiplos agentes e
+  `rho=1.0` concentrando o timing, dezenas de agentes DIFERENTES já caem no
+  mesmo bucket de hora por coincidência (até 104 eventos no mesmo timestep,
+  verificado diretamente em `eventos_desembolso`) — essa dispersão "de
+  fundo" entre eventos de agentes distintos (ordem de grandeza ~0.23, a
+  própria dispersão de `_amostrar_timestamps_desembolso`) domina
+  completamente a dispersão que a fragmentação de β introduz (ordem de
+  grandeza ~0.001, a escala de `_JANELA_FRAGMENTACAO_FIXA`) — confirmado
+  isolando um único evento original via `aplicar_batching` diretamente,
+  onde o efeito de β aparece claramente (`std` de `0.0` em β=1 para
+  `~0.001` em β>1). A coluna, nesta agregação por bucket multi-agente, é
+  preservação de dado bruto útil por si só (pode servir a outras decisões
+  futuras), mas NÃO é uma feature funcional de detecção de β nesta
+  granularidade — por isso não há teste de propriedade cross-β nesta
+  tarefa (testar contra um efeito que sabidamente não aparece seria
+  enganoso); só um teste de consistência (`timestamp_medio`/`timestep`,
+  `dispersao_timestamp==0.0` em bucket de um único evento).
+
+  **Pendência genuína, não resolvida aqui:** tornar o efeito de β
+  observável de verdade exigiria uma granularidade por EVENTO (não por
+  bucket) — mudança de schema real, a decidir com os orientadores quando o
+  experimento de robustez de β (`RobustezBeta`/`expandir_grade_robustez`,
+  desconectado do runner, ver entrada "Gap descoberto e documentado" acima)
+  for de fato desenhado. Não é bloqueante agora: `expandir_grade()` sempre
+  força `beta=1` no grid principal, β não está no caminho crítico da
+  geração do dataset principal.
+
+  **Fixture de retrocompatibilidade atualizada, não recriada do zero:**
+  `tests/fixtures/candidato_alvo_retrocompat/fonte_a.pkl` (usada por
+  `test_pipeline_geracao.py::test_candidato_alvo_zero_explicito_reproduz_hdf5_do_codigo_anterior_a_esta_tarefa`)
+  precisou ser regenerada — as 2 colunas novas quebravam a comparação de
+  shape contra a fixture antiga (6 colunas). Verificado antes de
+  regenerar, não assumido: as 6 colunas antigas são BYTE-A-BYTE idênticas
+  entre a fixture antiga e o HDF5 gerado pelo código novo
+  (`df_novo[colunas_antigas].equals(df_referencia)` — `True`) — a
+  regeneração só adiciona `timestamp_medio`/`dispersao_timestamp`, não
+  reintroduz o teste do zero. As outras 5 fixtures (`fonte_b`,
+  `fonte_c_*`, `metadados_janela`) não foram tocadas — fora do escopo desta
+  mudança.
 
 ## Estilo
 - Código Python com type hints

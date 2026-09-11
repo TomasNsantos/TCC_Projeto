@@ -21,7 +21,13 @@ def test_fonte_a_normal_taxa_zero_produz_vazio() -> None:
     fonte_a = gerar_fonte_a_normal(janela=JANELA, taxa=0.0, volume_medio=1000.0, random_state=1)
 
     assert fonte_a.empty
-    assert list(fonte_a.columns) == ["timestep", "n_eventos", "volume"]
+    assert list(fonte_a.columns) == [
+        "timestep",
+        "n_eventos",
+        "volume",
+        "timestamp_medio",
+        "dispersao_timestamp",
+    ]
 
 
 def test_fonte_b_normal_taxa_zero_produz_vazio() -> None:
@@ -33,12 +39,28 @@ def test_fonte_b_normal_taxa_zero_produz_vazio() -> None:
 def test_fonte_a_normal_formato_compativel_com_fonte_a_eventos_fronteira() -> None:
     fonte_a = gerar_fonte_a_normal(janela=JANELA, taxa=1.0, volume_medio=1000.0, random_state=1)
 
-    assert list(fonte_a.columns) == ["timestep", "n_eventos", "volume"]
+    assert list(fonte_a.columns) == [
+        "timestep",
+        "n_eventos",
+        "volume",
+        "timestamp_medio",
+        "dispersao_timestamp",
+    ]
     assert fonte_a["timestep"].dtype.kind == "i"
     assert fonte_a["n_eventos"].dtype.kind == "i"
     assert fonte_a["volume"].dtype.kind == "f"
     assert (fonte_a["n_eventos"] > 0).all()
     assert (fonte_a["volume"] > 0).all()
+
+
+def test_fonte_a_normal_timestamp_medio_e_dispersao_consistentes_com_timestep() -> None:
+    """timestamp_medio/dispersao_timestamp preservam o sinal contínuo
+    (pré-bucketização) descartado por np.floor(timestamps) -- ver CLAUDE.md."""
+    fonte_a = gerar_fonte_a_normal(janela=JANELA, taxa=2.0, volume_medio=1000.0, random_state=1)
+
+    assert len(fonte_a) == len(fonte_a["timestep"])
+    assert (np.floor(fonte_a["timestamp_medio"]).astype(int) == fonte_a["timestep"]).all()
+    assert (fonte_a.loc[fonte_a["n_eventos"] == 1, "dispersao_timestamp"] == 0.0).all()
 
 
 def test_independencia_fonte_a_e_fonte_b_normal() -> None:
@@ -148,7 +170,13 @@ def test_fonte_a_normal_pi_um_produz_vazio() -> None:
     )
 
     assert fonte_a_mascarada.empty
-    assert list(fonte_a_mascarada.columns) == ["timestep", "n_eventos", "volume"]
+    assert list(fonte_a_mascarada.columns) == [
+        "timestep",
+        "n_eventos",
+        "volume",
+        "timestamp_medio",
+        "dispersao_timestamp",
+    ]
 
 
 def test_fonte_a_normal_pi_intermediario_reduz_eventos_observados() -> None:

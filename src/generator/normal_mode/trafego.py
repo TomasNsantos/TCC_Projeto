@@ -37,6 +37,8 @@ def _fonte_a_normal_vazia() -> pd.DataFrame:
             "timestep": pd.Series(dtype=int),
             "n_eventos": pd.Series(dtype=int),
             "volume": pd.Series(dtype=float),
+            "timestamp_medio": pd.Series(dtype=float),
+            "dispersao_timestamp": pd.Series(dtype=float),
         }
     )
 
@@ -127,8 +129,16 @@ def gerar_fonte_a_normal(
     Returns
     -------
     pd.DataFrame
-        Colunas ``timestep`` (int), ``n_eventos`` (int), ``volume`` (float) —
-        mesmo formato de ``fonte_a_eventos_fronteira``, já filtrado por π.
+        Colunas ``timestep`` (int), ``n_eventos`` (int), ``volume`` (float),
+        ``timestamp_medio`` (float, média dos timestamps contínuos —
+        pré-bucketização — agregados naquele timestep) e
+        ``dispersao_timestamp`` (float, desvio-padrão POPULACIONAL —
+        ``ddof=0``, não o default do pandas — dos mesmos timestamps
+        contínuos; ``0.0``, não ``NaN``, quando o timestep tem um único
+        evento) — mesmo formato de ``fonte_a_eventos_fronteira``, já
+        filtrado por π. Ver CLAUDE.md para a ressalva sobre o que
+        ``dispersao_timestamp`` de fato captura (ou não) nesta agregação
+        por timestep.
     """
     rng = np.random.default_rng(random_state)
     n_total = rng.poisson(taxa * janela)
@@ -157,6 +167,10 @@ def gerar_fonte_a_normal(
     )
     volume_por_timestep = pd.Series(volumes).groupby(timesteps.values).sum()
     contagem["volume"] = contagem["timestep"].map(volume_por_timestep).to_numpy()
+
+    grupo_timestamp = pd.Series(timestamps).groupby(timesteps.values)
+    contagem["timestamp_medio"] = contagem["timestep"].map(grupo_timestamp.mean()).to_numpy()
+    contagem["dispersao_timestamp"] = contagem["timestep"].map(grupo_timestamp.std(ddof=0)).to_numpy()
     return contagem
 
 

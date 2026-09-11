@@ -67,7 +67,16 @@ def _dataframe_vazio(dtypes: dict) -> pd.DataFrame:
     return pd.DataFrame({coluna: pd.Series(dtype=dtype) for coluna, dtype in dtypes.items()})
 
 
-_DTYPES_FONTE_A = {"window_id": int, "classe": object, "split": object, "timestep": int, "n_eventos": int, "volume": float}
+_DTYPES_FONTE_A = {
+    "window_id": int,
+    "classe": object,
+    "split": object,
+    "timestep": int,
+    "n_eventos": int,
+    "volume": float,
+    "timestamp_medio": float,
+    "dispersao_timestamp": float,
+}
 _DTYPES_FONTE_B = {"window_id": int, "classe": object, "split": object, "timestamp": float}
 _DTYPES_FONTE_C = {"window_id": int, "classe": object, "split": object, "unidade": int, "fracao_candidato_alvo": float}
 _DTYPES_METADADOS = {
@@ -181,7 +190,8 @@ def escrever_run_hdf5(
 
     Tabelas gravadas
     -----------------
-    fonte_a : window_id, classe, split, timestep, n_eventos, volume
+    fonte_a : window_id, classe, split, timestep, n_eventos, volume,
+        timestamp_medio, dispersao_timestamp
     fonte_b : window_id, classe, split, timestamp
     fonte_c_secao / fonte_c_municipio / fonte_c_estado :
         window_id, classe, split, unidade, fracao_candidato_alvo

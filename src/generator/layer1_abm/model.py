@@ -466,8 +466,18 @@ class ElectionModel(mesa.Model):
         pd.DataFrame
             Colunas ``timestep`` (int, floor do timestamp de desembolso),
             ``n_eventos`` (contagem de desembolsos observados no timestep,
-            já filtrada por π) e ``volume`` (magnitude monetária agregada
-            no timestep, idem).
+            já filtrada por π), ``volume`` (magnitude monetária agregada
+            no timestep, idem), ``timestamp_medio`` (float, média dos
+            timestamps contínuos — pré-bucketização — agregados naquele
+            timestep; mesma unidade/escala de ``delta_t``, satisfaz
+            ``int(np.floor(timestamp_medio)) == timestep``) e
+            ``dispersao_timestamp`` (float, desvio-padrão POPULACIONAL —
+            ``ddof=0``, não o default do pandas — dos mesmos timestamps
+            contínuos; ``0.0``, não ``NaN``, quando o timestep tem um único
+            evento). As duas últimas preservam o sinal temporal contínuo
+            que a bucketização em timestep (1h) descarta — ver CLAUDE.md
+            para a ressalva sobre o que ``dispersao_timestamp`` de fato
+            captura (ou não) do efeito de β nesta agregação por timestep.
         """
         if not self.eventos_desembolso:
             return pd.DataFrame(
@@ -475,6 +485,8 @@ class ElectionModel(mesa.Model):
                     "timestep": pd.Series(dtype=int),
                     "n_eventos": pd.Series(dtype=int),
                     "volume": pd.Series(dtype=float),
+                    "timestamp_medio": pd.Series(dtype=float),
+                    "dispersao_timestamp": pd.Series(dtype=float),
                 }
             )
 
@@ -487,10 +499,13 @@ class ElectionModel(mesa.Model):
                     "timestep": pd.Series(dtype=int),
                     "n_eventos": pd.Series(dtype=int),
                     "volume": pd.Series(dtype=float),
+                    "timestamp_medio": pd.Series(dtype=float),
+                    "dispersao_timestamp": pd.Series(dtype=float),
                 }
             )
 
-        timesteps = [int(np.floor(t)) for t, _ in eventos_observados]
+        timestamps_continuos = [t for t, _ in eventos_observados]
+        timesteps = [int(np.floor(t)) for t in timestamps_continuos]
         contagem = (
             pd.Series(timesteps)
             .value_counts()
@@ -499,6 +514,10 @@ class ElectionModel(mesa.Model):
             .reset_index(name="n_eventos")
         )
         contagem["volume"] = contagem["n_eventos"] * (self.recompensa / self.beta)
+
+        grupo = pd.Series(timestamps_continuos).groupby(pd.Series(timesteps))
+        contagem["timestamp_medio"] = contagem["timestep"].map(grupo.mean()).to_numpy()
+        contagem["dispersao_timestamp"] = contagem["timestep"].map(grupo.std(ddof=0)).to_numpy()
         return contagem
 
     def _fracoes_por_grupo(self, mascara: np.ndarray, grupos: np.ndarray, n_grupos: int) -> pd.Series:

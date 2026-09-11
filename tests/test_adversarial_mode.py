@@ -42,7 +42,13 @@ def test_contrato_ativa_formato_e_tamanho_compativel_com_beta() -> None:
     cenario = gerar_cenario_adversarial(modelo, tau_kendall=0.6, random_state_fonte_b=2)
 
     assert cenario.contrato_ativado is True
-    assert list(cenario.fonte_a.columns) == ["timestep", "n_eventos", "volume"]
+    assert list(cenario.fonte_a.columns) == [
+        "timestep",
+        "n_eventos",
+        "volume",
+        "timestamp_medio",
+        "dispersao_timestamp",
+    ]
 
     n_agentes_pagos = sum(1 for a in modelo.agents if a.aderiu)
     assert len(modelo.eventos_desembolso) == n_agentes_pagos * 3
