@@ -7,3 +7,6 @@ __pycache__/
 .DS_Store
 .vscode/settings.json
 mlruns/
+mlflow.db
+manifesto*.db
+output/
