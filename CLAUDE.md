@@ -186,6 +186,23 @@ via Mesa), Camada 2 (estrutura de dependência via cópula Clayton, biblioteca
   efeito (ex.: razão eventos/volume, o "indicador de batch" já citado no
   PLANO §5.3.1, ou contagem de sub-eventos por timestep), que podem continuar
   monotônicas mesmo quando a amplitude bruta não é.
+
+  **Atualização — Item 4 ("Temas para decisão com os orientadores")
+  desbloqueado, possivelmente já resolvido.** Este achado estava listado
+  como Item 4 desse documento externo, deferido até o Item 3
+  (`candidato_alvo`/`eleitores_por_secao`) estar completo — Item 3 fechou
+  nesta sessão, então Item 4 está desbloqueado para decisão. **Mas note a
+  tensão com a entrada "Janela de fragmentação de `aplicar_batching` —
+  FIXA" (mais abaixo neste arquivo):** aquela entrada, de uma tarefa
+  posterior a este achado, já implementa a opção (a) listada aqui (janela
+  fixa em vez de `delta_t/beta`) e conclui explicitamente que "Sanity
+  Check 3 NÃO precisa ser reformulado — a correção ataca a causa raiz, não
+  o critério de validação". Isso pode significar que o Item 4 já está
+  RESOLVIDO, não só desbloqueado — registrado aqui como desbloqueado (não
+  como resolvido) porque não tenho o texto completo do Item 4 no documento
+  externo para confirmar se ele cobre só esta questão específica ou algo
+  mais amplo; fica para você (ou os orientadores) confirmar se pode ser
+  fechado.
 - **Sanity Check 2 (ρ=1.0, λ máximo) — limite conhecido, caracterizado por
   teste, não corrigido:** τ_Kendall(A,B) não atinge o limiar de 0.4 do PLANO
   nessa configuração (τ empírico ≈ 0.134 com os parâmetros do notebook
@@ -1023,6 +1040,41 @@ via Mesa), Camada 2 (estrutura de dependência via cópula Clayton, biblioteca
   porque foi o dado que corrigiu a calibração de `k` (o baseline
   relevante para "quanto o adversário precisa superar" não é 0.20 puro,
   é ~0.28 com o ruído de adesão já embutido).
+
+  **Progresso parcial do Item 6 ("Temas para decisão com os
+  orientadores" — utilidade do adversário nunca formalizada), commit
+  `1213144`.** Esta decisão não formaliza a função de utilidade do
+  adversário por completo, mas resolve uma peça dela: define
+  explicitamente o que CONTA COMO SUCESSO para o adversário (o
+  candidato-alvo atingir `K_RESULTADO_ALVO/n_candidatos` dos votos
+  válidos) — esse limiar de sucesso é, por definição, parte de qualquer
+  função de utilidade do adversário (o termo que a utilidade deveria
+  maximizar/satisfazer). Registrado aqui como progresso PARCIAL, não
+  fechamento do Item 6: `k=2.0` continua sem calibração formal (decidido
+  por smoke test empírico nesta sessão, não por literatura ou consenso
+  com orientadores — mesma pendência já registrada acima), e a utilidade
+  do adversário provavelmente envolve mais termos além do limiar de
+  sucesso (custo/detectabilidade, mencionados no próprio Item 6) que
+  esta mudança não toca.
+
+  **Recomendação de avaliação para Semana 9-10 — M1/M2/M3 devem reportar
+  métricas separadas por sub-classe, não só positiva-vs-negativa
+  agregada.** Verificado no smoke test desta sessão (grade reduzida, 18
+  combinações × 300 janelas/classe: 5400 janelas negativas, 3786
+  positivas-ativas, 1614 positivas-inativas): ~29,9% das janelas da
+  classe positiva (1614/5400, ~14,9% do total das duas classes) têm
+  `contrato_ativado=False` — o CSC não ativou, e Fonte
+  A/B ficam vazias por construção (não é ruído nem sinal fraco: é
+  ausência estrutural de sinal). Recomendação: avaliar M1/M2/M3 com
+  métricas separadas para três grupos — (1) negativa, (2) positiva com
+  `contrato_ativado=True` (Fonte A/B/C todas carregam sinal), (3)
+  positiva com `contrato_ativado=False` (só Fonte C carrega o resíduo
+  de adesão sincera não paga, ver achado acima) — além da métrica
+  agregada positiva-vs-negativa tradicional. Sem essa separação, baixa
+  performance do detector no grupo (3) seria indistinguível de "detector
+  fraco" quando na verdade reflete a ausência estrutural de sinal em
+  A/B para esse subconjunto — risco de má interpretação dos resultados,
+  não um problema do detector em si.
 
 ## Estilo
 - Código Python com type hints
