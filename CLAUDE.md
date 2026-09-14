@@ -906,6 +906,123 @@ via Mesa), Camada 2 (estrutura de dependência via cópula Clayton, biblioteca
   **Fora do escopo desta correção:** nenhuma mudança em Item 5 (λ/taxa/
   volume não calibrados), Item 6 (ρ/prop_racional na utilidade do
   adversário), ou qualquer outra pendência já registrada acima.
+- **`resultado_alvo = K_RESULTADO_ALVO / n_candidatos`, substituindo o
+  default fixo `0.5` de `ElectionModel` — achado: `0.5` produzia ativação
+  binária 0%/100%/100% em `recompensa ∈ {0.5, 1.0, 1.5}`, não um
+  gradiente.** `src/pipeline/config.py` (`K_RESULTADO_ALVO`, `k=2.0`),
+  `src/pipeline/geracao.py` (`gerar_par_de_classes_real`).
+
+  **Achado que motivou a mudança, verificado diretamente no dataset de
+  produção v1 (270 arquivos, 270.000 janelas positivas, não estimativa):**
+  com `resultado_alvo=0.5` (maioria absoluta) e `n_candidatos=5`
+  (baseline de voto uniforme ~0.20, `_voto_e_candidato_alvo`), a taxa de
+  ativação (`contrato_ativado`, coluna já persistida em `metadados_janela`
+  — `storage.py:82-89`) era **0/90.000 em `recompensa=0.5`, 90.000/90.000
+  em `recompensa=1.0`, 90.000/90.000 em `recompensa=1.5`** — em TODA
+  combinação de π/Δt/ρ, sem exceção, sem interação desses três eixos com
+  a taxa de ativação (confirmado em quebras π×recompensa, Δt×recompensa,
+  ρ×recompensa, todas idênticas ao padrão agregado). Não era "recompensa
+  baixa ativa pouco" — era um degrau perfeito entre 0.5 e 1.0, tornando
+  `recompensa` sozinho um preditor trivial e determinístico da classe
+  positiva/negativa dentro da própria classe positiva.
+
+  **Por que `k/n_candidatos` e não um valor fixo:** `_voto_e_candidato_alvo`
+  compara a fração de votos do candidato-alvo contra `resultado_alvo`; o
+  baseline SEM incentivo (voto de base uniforme sobre `n_candidatos`)
+  escala com `1/n_candidatos`, não é uma constante — um `resultado_alvo`
+  fixo re-escolhido para `n_candidatos=5` ficaria desalinhado se uma
+  rodada futura explorar `n_candidatos` 6-10 (nota de orientação já
+  registrada acima, "Escolha de candidato (v0)"). `k=2.0` (`config.py`)
+  é decidido por smoke test empírico nesta sessão, não calibração formal
+  — mesma categoria de pendência de `tau_kendall`/`taxa_fonte_a`/
+  `volume_medio_fonte_a`/`taxa_fonte_b`.
+
+  **Achado conceitual central, relevante para avaliação de M1/M2/M3
+  (Semanas 9-10) — os três níveis de recompensa testam "abaixo / próximo
+  / acima do limiar de ativação" (C_min), NÃO uma escala contínua
+  fraco→forte.** Confirmado por smoke test empírico com `k=2.0`
+  (`resultado_alvo=0.40`, `n_candidatos=5`): a distribuição de
+  `fracao_candidato_alvo` em cada nível de `recompensa` é estreita e bem
+  separada das outras —
+  ```
+  recompensa=0.5: fracao_candidato_alvo mean=0.373 (std=0.049) -> ativação 11.5%
+  recompensa=1.0: fracao_candidato_alvo mean=0.640 (std=0.048) -> ativação 100%
+  recompensa=1.5: fracao_candidato_alvo mean=0.802 (std=0.041) -> ativação 100%
+  ```
+  Por construção matemática do modelo (a relação entre `recompensa` e a
+  fração de adesão racional satura rapidamente — ver a curva de adesão já
+  documentada na nota de calibração de `recompensa` nos scripts de
+  produção), **não existe nenhum valor de `k` que produza um gradiente
+  suave nos três pontos ao mesmo tempo**: qualquer `resultado_alvo` fica
+  ou abaixo da distribuição de 1.0/1.5 (saturando as duas em ~100%) ou
+  acima da distribuição de 0.5 (zerando a ativação nesse nível) — as três
+  distribuições estão longe demais entre si para um único limiar
+  intermediário produzir uma rampa. **Implicação para M1/M2/M3:** baixa
+  performance do detector especificamente em `recompensa=0.5` é
+  ESPERADA E REPORTÁVEL — a maioria das janelas positivas desse nível
+  tem Fonte A/B genuinamente vazias (ver achado seguinte), não um sinal
+  fraco a ser detectado; não deve ser interpretada como falha do
+  detector nem como indicação de que o design fatorial precisa de mais
+  níveis intermediários de recompensa (isso resolveria o gradiente de
+  `fracao_candidato_alvo`, mas não o de `contrato_ativado`, que continua
+  binário por natureza — é uma condição `if resultado >= alvo`, não uma
+  variável contínua).
+
+  **Achado adicional, verificado nas janelas NÃO-ativadas de
+  `recompensa=0.5` (~88.5% delas) — Fonte A/B ficam genuinamente vazias,
+  mas Fonte C carrega um resíduo real de adesão sincera não paga.**
+  Verificado diretamente no código e em dados: `resolver_desembolso()`
+  (`model.py:355-357`) retorna IMEDIATAMENTE se `contrato_ativado=False`,
+  antes de construir a lista de agentes pagos ou amostrar qualquer
+  timestamp — `eventos_desembolso` permanece vazio, `fonte_a_eventos_fronteira`
+  retorna 0 linhas, `gerar_cenario_adversarial` tem um branch explícito
+  que nem chama `gerar_fonte_b` (`cenario.py:149-151`). Confirmado
+  empiricamente em 56 janelas não-ativadas amostradas: Fonte A/B/
+  `eventos_desembolso` vazios em 100% dos casos, zero exceções — é
+  exatamente "if oracle.result==R: transfer(...)" (PLANO §5.1.1),
+  condicional binária, não um efeito parcial.
+
+  MAS `agent.aderiu`/`agent.votou_conforme` são decididos na Fase 1
+  (`VoterAgent.step()`, `agent.py:82-100`), **antes e independente** de
+  a Fase 2 sequer rodar — `_voto_e_candidato_alvo()`, usada por TODAS as
+  variantes de Fonte C (`resultado_eleitoral_por_secao/municipio/estado`,
+  `fonte_c_resultado_agregado`), conta como voto no candidato-alvo
+  qualquer agente com `aderiu and votou_conforme`, **sem checar se o
+  contrato ativou**. Confirmado empiricamente (5 seeds, `recompensa=0.5`,
+  todas com `contrato_ativado=False`): 90-118 de 500 agentes aderiram e
+  votaram conforme sem receber nenhum pagamento, e esses votos SOMAM em
+  Fonte C — `fonte_c_resultado_agregado()` fica em ~0.36-0.39, bem acima
+  do baseline puro da classe negativa (~0.28, ver achado abaixo). Não é
+  um bug — é decorrência direta de `_voto_e_candidato_alvo` já existente
+  e coerente com a mecânica real (a decisão de voto acontece na cabine;
+  o pagamento é condicional e posterior; um eleitor pode cumprir a
+  promessa mesmo que o pagamento nunca chegue). **Implicação para o
+  estudo de ablação de fontes (C1-C7):** janelas positivas com
+  `contrato_ativado=False` são, se detectáveis, detectáveis SÓ via Fonte
+  C isolada — Fonte A/B não carregam nenhuma informação nessas janelas.
+  Isso é relevante para interpretar resultados de ablação que removem
+  Fonte C: um detector sem Fonte C não tem NENHUM sinal disponível nessas
+  janelas especificamente, distinto de janelas ativadas (onde A/B/C
+  carregam sinal simultaneamente).
+
+  **Achado auxiliar, não específico desta mudança mas usado para calibrar
+  `k` — o baseline da classe negativa (~0.28) é maior que o baseline
+  teórico de voto uniforme (0.20), por um mecanismo já existente antes
+  desta tarefa.** `VoterAgent.step()` (`agent.py:87-91`): agentes NÃO
+  racionais decidem por `rng.random() < propensao`, sem nunca consultar
+  `recompensa` — com `recompensa=0.0` (classe negativa), agentes
+  racionais nunca aderem, mas os ~10% não-racionais (`prop_racional=0.9`)
+  continuam "aderindo" por ruído puro, independente de existir incentivo
+  real. Reproduzido isoladamente: `ElectionModel(n_agentes=5000,
+  recompensa=0.0, seed=1)` → 527/5000 agentes não-racionais aderem (0
+  racionais) → `_voto_e_candidato_alvo().mean() = 0.2822`, batendo com a
+  média de 0.2804 observada no grid v1 inteiro (1.350.000 linhas
+  janela×seção, idêntica em todo nível de `recompensa`, como esperado —
+  a negativa nunca lê esse eixo). Não é um bug — é consequência do
+  desenho já existente da regra de decisão não-racional; registrado aqui
+  porque foi o dado que corrigiu a calibração de `k` (o baseline
+  relevante para "quanto o adversário precisa superar" não é 0.20 puro,
+  é ~0.28 com o ruído de adesão já embutido).
 
 ## Estilo
 - Código Python com type hints
