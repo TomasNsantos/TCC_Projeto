@@ -28,6 +28,27 @@ valor nesta tarefa com lastro direto no PLANO; todo o resto em
 ``ParametrosPopulacionaisStub``/``ParametrosStubGeracao`` é stub v0 sem
 calibração (ver CLAUDE.md)."""
 
+K_RESULTADO_ALVO: float = 2.0
+"""Multiplicador usado por `src.pipeline.geracao.gerar_par_de_classes_real`
+para calcular ``ElectionModel.resultado_alvo = K_RESULTADO_ALVO /
+n_candidatos`` — substitui o antigo default fixo (`0.5`, maioria absoluta),
+que ficava acima do alcance de qualquer nível de ``recompensa`` do grid
+principal com ``n_candidatos=5`` (baseline de voto uniforme ~0.20; achado:
+``resultado_alvo=0.5`` produzia 0%/100%/100% de ativação em
+``recompensa ∈ {0.5, 1.0, 1.5}``, não uma variação gradual — ver CLAUDE.md).
+Escalar por `n_candidatos` (em vez de um valor fixo) mantém a interpretação
+"o adversário precisa de `K_RESULTADO_ALVO` vezes o resultado que teria por
+puro acaso" válida se `n_candidatos` mudar numa rodada futura (PLANO cita
+explorar 6-10 candidatos). ``k=2.0`` é uma suposição v0 sem calibração
+formal — mesma categoria de `tau_kendall`/`taxa_fonte_a`/`volume_medio_fonte_a`/
+`taxa_fonte_b`, decidida por smoke test empírico (não por literatura), não
+consenso com orientadores. Vive aqui (não em `ElectionModel`) porque é a
+camada que já conhece `n_candidatos` como eixo populacional/design fatorial
+— `ElectionModel.resultado_alvo` continua um `float` explícito, agnóstico a
+essa fórmula, consistente com o resto do módulo (mesmo padrão de
+`resultado_alvo`/`threshold_range` já documentado como fora do escopo de
+`GradeFatorial`/`ParametrosPopulacionaisStub`)."""
+
 _N_SECOES_DEFAULT: int = 5
 """Default de ``ParametrosPopulacionaisStub.n_secoes`` — extraído como
 constante de módulo (não só um literal no default do campo) porque também

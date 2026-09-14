@@ -92,6 +92,46 @@ def test_n_candidatos_um_levanta_erro_claro_antes_de_gerar_qualquer_janela(
     mock_election_model.assert_not_called()
 
 
+def test_resultado_alvo_escala_com_k_sobre_n_candidatos(
+    stub_geracao: ParametrosStubGeracao, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """resultado_alvo passado a ElectionModel deve ser K_RESULTADO_ALVO/n_candidatos,
+    não mais o default fixo 0.5 -- achado que motivou a mudança (ver
+    CLAUDE.md): 0.5 fixo produzia 0%/100%/100% de ativação em
+    recompensa in {0.5, 1.0, 1.5} com n_candidatos=5, sem gradiente.
+    Verificado via spy no ElectionModel real (não um Mock cego) para
+    também confirmar que o resto da chamada continua funcionando -- um
+    Mock puro provaria só que o valor foi passado, não que o pipeline
+    inteiro aceita o novo cálculo sem quebrar."""
+    from src.pipeline.config import K_RESULTADO_ALVO
+
+    resultados_alvo_recebidos = []
+    election_model_original = _ElectionModelReal
+
+    def _election_model_spy(*args, **kwargs):
+        resultados_alvo_recebidos.append(kwargs["resultado_alvo"])
+        return election_model_original(*args, **kwargs)
+
+    monkeypatch.setattr("src.pipeline.geracao.ElectionModel", _election_model_spy)
+
+    for n_candidatos in (3, 5):
+        resultados_alvo_recebidos.clear()
+        populacionais = ParametrosPopulacionaisStub(n_agentes=50, n_secoes=2, n_candidatos=n_candidatos)
+
+        gerar_par_de_classes_real(
+            _PARAMS_ATIVA_CONTRATO, seed=1, n_janelas=2, populacionais=populacionais,
+            stub_geracao=stub_geracao, diretorio_output=tmp_path / f"n{n_candidatos}",
+        )
+
+        esperado = K_RESULTADO_ALVO / n_candidatos
+        assert resultados_alvo_recebidos, "ElectionModel nao foi chamado -- spy nao capturou nada"
+        # 2 janelas positivas + 2 negativas = 4 chamadas, todas com o mesmo resultado_alvo
+        assert all(r == pytest.approx(esperado) for r in resultados_alvo_recebidos), (
+            f"resultado_alvo esperado={esperado} (K={K_RESULTADO_ALVO}/n_candidatos={n_candidatos}), "
+            f"recebido={resultados_alvo_recebidos}"
+        )
+
+
 def test_granularidade_diferente_de_pool_usa_unidade_alvo_zero(
     populacionais: ParametrosPopulacionaisStub, stub_geracao: ParametrosStubGeracao, tmp_path
 ) -> None:
@@ -307,6 +347,19 @@ def test_candidato_alvo_zero_explicito_reproduz_hdf5_do_codigo_anterior_a_esta_t
     pd.HDFStore/PyTables embute timestamp/metadado interno a cada escrita,
     então duas escritas do MESMO DataFrame produzem arquivos com hashes
     diferentes mesmo sem nenhuma mudança de conteúdo).
+
+    **Ressalva (tarefa posterior, resultado_alvo=k/n_candidatos):** este
+    teste continua passando byte-a-byte mesmo depois de `resultado_alvo`
+    deixar de ser o default fixo `0.5` de `ElectionModel` e passar a ser
+    calculado como `K_RESULTADO_ALVO/n_candidatos` em `geracao.py` (ver
+    CLAUDE.md) — mas isso NÃO é evidência de retrocompatibilidade do novo
+    cálculo, é um acidente deste cenário específico: `recompensa=10.0` é
+    alto o bastante para ativar o contrato com folga em qualquer um dos
+    dois valores de `resultado_alvo` (`0.5` antigo vs. `2.0/3≈0.667`
+    novo), confirmado empiricamente (as 4 janelas positivas ativam nos
+    dois casos). Este teste cobre retrocompatibilidade de
+    `candidato_alvo`, não de `resultado_alvo` — a fórmula nova é coberta
+    por `test_resultado_alvo_escala_com_k_sobre_n_candidatos` abaixo.
     """
     populacionais = ParametrosPopulacionaisStub(n_agentes=100, n_secoes=4, n_candidatos=3, candidato_alvo=0)
     stub_geracao = ParametrosStubGeracao(tau_kendall=0.5, taxa_fonte_a=1.0, volume_medio_fonte_a=1000.0, taxa_fonte_b=1.0)

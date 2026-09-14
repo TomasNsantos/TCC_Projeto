@@ -15,7 +15,13 @@ import numpy as np
 from src.generator.adversarial_mode import gerar_cenario_adversarial
 from src.generator.layer1_abm import ElectionModel
 from src.generator.normal_mode import gerar_cenario_normal
-from src.pipeline.config import ParametrosPopulacionaisStub, ParametrosStubGeracao, derivar_seeds, run_id
+from src.pipeline.config import (
+    K_RESULTADO_ALVO,
+    ParametrosPopulacionaisStub,
+    ParametrosStubGeracao,
+    derivar_seeds,
+    run_id,
+)
 from src.pipeline.runner import GerarParDeClasses
 from src.pipeline.storage import JanelaNegativa, JanelaPositiva, escrever_run_hdf5
 
@@ -67,11 +73,26 @@ def gerar_par_de_classes_real(
     seção/município/estado), mas não é uma escolha definitiva de qual
     unidade mirar.
 
-    ``resultado_alvo``/``threshold_range`` de `ElectionModel` não são
-    parâmetros de `GradeFatorial`/`ParametrosPopulacionaisStub` (tarefa
-    anterior) — ficam no default da própria classe (`0.5`/`(0.2, 0.8)`).
-    Limite de escopo desta camada de config, não esquecimento; documentado
-    em CLAUDE.md.
+    ``threshold_range`` de `ElectionModel` não é parâmetro de
+    `GradeFatorial`/`ParametrosPopulacionaisStub` — fica no default da
+    própria classe (`(0.2, 0.8)`). Limite de escopo desta camada de
+    config, não esquecimento; documentado em CLAUDE.md.
+
+    **`resultado_alvo` — calculado aqui, não é mais o default fixo de
+    `ElectionModel` (tarefa posterior à nota acima):**
+    `resultado_alvo = K_RESULTADO_ALVO / populacionais.n_candidatos`
+    (`config.K_RESULTADO_ALVO`, ver docstring da constante para a
+    motivação/achado que levou à mudança). Calculado aqui, não dentro de
+    `ElectionModel`, porque esta é a camada que já conhece `n_candidatos`
+    como eixo populacional — `ElectionModel.resultado_alvo` continua um
+    `float` explícito e agnóstico à fórmula, só recebendo o valor já
+    resolvido. Idêntico nos dois blocos (positiva e negativa), já que
+    `n_candidatos` é o mesmo `populacionais.n_candidatos` para as duas
+    classes — embora `resultado_alvo` seja inofensivo na classe negativa
+    (`gerar_cenario_normal` nunca chama `resolver_desembolso()`, então o
+    valor nunca é lido), passar o mesmo valor calculado evita deixar a
+    negativa com um `resultado_alvo` divergente do da positiva sem razão,
+    e mantém as duas chamadas de `ElectionModel(...)` simétricas.
 
     Fase de derivação de seeds: `derivar_seeds(seed, n_janelas, "positiva"/
     "negativa")` dá exatamente 2 sub-seeds por janela
@@ -207,6 +228,7 @@ def gerar_par_de_classes_real(
 
     granularidade = params["g"]
     unidade_alvo = 0 if granularidade != "pool" else None
+    resultado_alvo = K_RESULTADO_ALVO / populacionais.n_candidatos
 
     seeds_positivas = derivar_seeds(seed, n_janelas, "positiva")
     seeds_negativas = derivar_seeds(seed, n_janelas, "negativa")
@@ -231,6 +253,7 @@ def gerar_par_de_classes_real(
                 candidato_alvo=candidato_alvo,
                 prob_conformidade=populacionais.prob_conformidade,
                 recompensa=params["recompensa"],
+                resultado_alvo=resultado_alvo,
                 delta_t=params["delta_t"],
                 rho=params["rho"],
                 beta=params["beta"],
@@ -277,6 +300,7 @@ def gerar_par_de_classes_real(
                 candidato_alvo=candidato_alvo,
                 prob_conformidade=populacionais.prob_conformidade,
                 recompensa=0.0,
+                resultado_alvo=resultado_alvo,
                 delta_t=params["delta_t"],
                 rho=params["rho"],
                 beta=params["beta"],
