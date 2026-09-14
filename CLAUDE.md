@@ -1075,6 +1075,49 @@ via Mesa), Camada 2 (estrutura de dependência via cópula Clayton, biblioteca
   fraco" quando na verdade reflete a ausência estrutural de sinal em
   A/B para esse subconjunto — risco de má interpretação dos resultados,
   não um problema do detector em si.
+- **`g=["pool"]` é a única granularidade usada no dataset de produção
+  v1/v2 — pendência não-bloqueante para hoje, mas vinculada a OE5/OE6/
+  §5.4.6/§7 do PLANO, merece pauta com os orientadores antes de
+  qualquer implementação.** OE5 declara granularidade eleitoral (`g`)
+  como um dos cinco eixos do design fatorial principal (junto com π, Δt,
+  λ, ρ); OE6/§5.4.6/§7 prometem caracterizar `g*` (valor crítico de
+  granularidade além do qual a detecção colapsa) e a curva `C_min(π, g,
+  Δt)`. **Nenhum dos dois é sustentável com `g` fixo em `"pool"`** — não
+  há variação nesse eixo em nenhum dos datasets gerados até agora.
+
+  **O que já funciona, confirmado nesta sessão (não é limitação de
+  capacidade do código):** `ElectionModel`/`resolver_desembolso` já
+  suportam `secao`/`municipio`/`estado` corretamente — testado tanto
+  pelo teste já existente
+  (`test_resolver_desembolso_respeita_granularidade_e_unidade_alvo`,
+  `tests/test_layer1_abm.py:411-435`, mesma config variando só
+  `granularidade`: pool ativa, seção isolada não ativa) quanto por
+  verificação própria com a configuração de produção atual
+  (`resultado_alvo=k/n_candidatos`): `recompensa=1.0` ativa pool e as 5
+  seções individuais; `recompensa=0.5` não ativa nenhuma; `eventos_desembolso`
+  reflete corretamente cada decisão (296 eventos quando ativa, 0 quando
+  não). `município`/`estado` são DEGENERADOS com `n_agentes=500`
+  (hierarquia default colapsa tudo em 1 município/1 estado, já
+  documentado acima) — só `g="secao"` é uma granularidade real e não
+  degenerada nesse tamanho de população (5 seções distintas, confirmado).
+
+  **O que falta é decisão de design, não implementação de mecanismo:**
+  `geracao.py` mapeia `g` para `granularidade` diretamente, mas hardcoda
+  `unidade_alvo=0` sempre que `g != "pool"` — nunca sorteia/varia QUAL
+  seção é mirada por janela. Mesmo tipo de decisão já resolvida para
+  `candidato_alvo=None` (sorteio por janela, commit `0fffdd5`) — a
+  mecânica de "sortear um índice por janela antes de construir
+  `ElectionModel`" já existe como padrão no código, só precisa ser
+  decidida e aplicada a `unidade_alvo` também.
+
+  **Ação necessária antes da fase de caracterização de limites (§5.4.6),
+  não hoje:** gerar uma rodada adicional variando `g` — não
+  necessariamente o grid completo de 270 combinações, provavelmente
+  `g ∈ {"pool", "secao"}` sobre um subconjunto do grid já validado —
+  depois de decidir a política de sorteio/escolha de `unidade_alvo`.
+  **Não bloqueia a regeneração de hoje nem o início da Semana 9-10** —
+  registrado aqui só para não ser esquecido antes da etapa de
+  caracterização de `g*`/`C_min(π,g,Δt)`.
 
 ## Estilo
 - Código Python com type hints
