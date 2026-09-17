@@ -93,8 +93,17 @@ def gerar_cenario_normal(
         Duração da janela de observação de Fonte A/B (independente de
         ``modelo_eleicao.n_steps``, que rege só a campanha de adesão) —
         mesma unidade de ``ElectionModel.delta_t`` (1 timestep = 1 hora,
-        PLANO §5.2.2: ``Δt ∈ {0h, 2h, 24h}``), tipicamente passada como o
-        próprio ``delta_t`` do cenário (ver ``src/pipeline/geracao.py``).
+        PLANO §5.2.2: ``Δt ∈ {0h, 2h, 24h}``), mas CONCEITUALMENTE
+        DISTINTA dele: ``delta_t`` é o atraso de divulgação/janela pós-
+        resultado da classe positiva (Fase 2), enquanto ``janela`` aqui é a
+        duração de observação do tráfego de fundo independente, sem
+        relação com a eleição sendo simulada. Reusar ``delta_t`` diretamente
+        como ``janela`` foi um acoplamento sem justificativa de escopo,
+        corrigido em ``src/pipeline/geracao.py::_janela_trafego_fundo`` —
+        ver ``src/pipeline/config.py::JANELA_TRAFEGO_FUNDO_QUANDO_DELTA_T_ZERO``
+        para o achado completo (com ``delta_t=0.0``, o reuso direto zerava
+        ``Poisson(taxa*0)`` e deixava Fonte A/B vazias em 100% das janelas
+        da classe negativa — separador trivial de classe, não sinal real).
     taxa_fonte_a, volume_medio_fonte_a, taxa_fonte_b : float
         Parâmetros de ``gerar_fonte_a_normal``/``gerar_fonte_b_normal`` —
         suposições v0 sem valor calibrado, ver docstring de ``trafego.py``.

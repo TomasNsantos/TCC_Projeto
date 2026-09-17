@@ -16,6 +16,7 @@ from src.generator.adversarial_mode import gerar_cenario_adversarial
 from src.generator.layer1_abm import ElectionModel
 from src.generator.normal_mode import gerar_cenario_normal
 from src.pipeline.config import (
+    JANELA_TRAFEGO_FUNDO_QUANDO_DELTA_T_ZERO,
     K_RESULTADO_ALVO,
     ParametrosPopulacionaisStub,
     ParametrosStubGeracao,
@@ -43,6 +44,24 @@ def _seed_sequence_para_int(seed_sequence: np.random.SeedSequence) -> int:
     via `SeedSequence.generate_state`, que ambas as APIs aceitam.
     """
     return int(seed_sequence.generate_state(1, dtype=np.uint32)[0])
+
+
+def _janela_trafego_fundo(delta_t: float) -> float:
+    """Janela de observação (`janela`) do tráfego de fundo (Fonte A/B) da
+    classe negativa — DISTINTA de `ElectionModel.delta_t` (Fase 2/desembolso
+    da classe positiva, não afetada por esta função).
+
+    ``delta_t`` continua sendo o valor com ``delta_t != 0.0``; só quando
+    ``delta_t == 0.0`` a janela do tráfego de fundo passa a ser
+    `JANELA_TRAFEGO_FUNDO_QUANDO_DELTA_T_ZERO` (ver docstring da constante
+    em `config.py` para a motivação completa: reusar `delta_t=0.0`
+    diretamente zerava `Poisson(taxa*0)`, deixando Fonte A/B da classe
+    negativa vazias em 100% das janelas nessa combinação — separador
+    trivial de classe, não sinal adversarial).
+    """
+    if delta_t == 0.0:
+        return JANELA_TRAFEGO_FUNDO_QUANDO_DELTA_T_ZERO
+    return delta_t
 
 
 def gerar_par_de_classes_real(
@@ -93,6 +112,25 @@ def gerar_par_de_classes_real(
     valor nunca é lido), passar o mesmo valor calculado evita deixar a
     negativa com um `resultado_alvo` divergente do da positiva sem razão,
     e mantém as duas chamadas de `ElectionModel(...)` simétricas.
+
+    **Janela de tráfego de fundo (Fonte A/B, classe negativa) — DISTINTA de
+    `delta_t` quando `delta_t == 0.0`.** `gerar_cenario_normal` recebe
+    `janela=_janela_trafego_fundo(params["delta_t"])`, não
+    `params["delta_t"]` diretamente (correção de uma tarefa posterior à
+    versão original desta função — ver `config.JANELA_TRAFEGO_FUNDO_QUANDO_DELTA_T_ZERO`
+    para a motivação completa). Reusar `delta_t` como `janela` do tráfego
+    de fundo era um acoplamento sem justificativa de escopo: com
+    `delta_t=0.0`, `Poisson(taxa*0)=0` deixava Fonte A/B da classe negativa
+    vazias em 100% das janelas — combinado com a classe positiva
+    concentrando eventos em `t=0` sob o mesmo `delta_t=0.0` (comportamento
+    correto do lado positivo, não tocado aqui), "possuir alguma linha em
+    Fonte A/B" virava separador trivial de classe nas combinações
+    `delta_t=0.0`. `_janela_trafego_fundo` é no-op para `delta_t != 0.0`
+    (retorna o próprio `delta_t`, comportamento idêntico ao de antes desta
+    correção) — só muda algo nas 90 combinações `delta_t=0.0` do design
+    fatorial. `ElectionModel(delta_t=params["delta_t"], ...)` (Fase 2) não
+    é afetado: essa instância nunca chama `resolver_desembolso()` na classe
+    negativa, e `delta_t` ali continua o valor original da grade.
 
     Fase de derivação de seeds: `derivar_seeds(seed, n_janelas, "positiva"/
     "negativa")` dá exatamente 2 sub-seeds por janela
@@ -313,7 +351,7 @@ def gerar_par_de_classes_real(
             seed_pi_negativa = seed_modelo.spawn(1)[0]
             cenario = gerar_cenario_normal(
                 modelo,
-                janela=params["delta_t"],
+                janela=_janela_trafego_fundo(params["delta_t"]),
                 taxa_fonte_a=stub_geracao.taxa_fonte_a,
                 volume_medio_fonte_a=stub_geracao.volume_medio_fonte_a,
                 taxa_fonte_b=stub_geracao.taxa_fonte_b,

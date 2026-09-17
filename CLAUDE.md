@@ -1119,6 +1119,82 @@ via Mesa), Camada 2 (estrutura de dependência via cópula Clayton, biblioteca
   registrado aqui só para não ser esquecido antes da etapa de
   caracterização de `g*`/`C_min(π,g,Δt)`.
 
+- **Bug corrigido (2026-09-17) — `delta_t=0.0` reusado como janela do
+  tráfego de fundo (Fonte A/B, classe negativa), zerando `Poisson(taxa*0)`
+  e criando separador trivial de classe nas 90 combinações `delta_t=0.0`
+  do dataset de produção v2. `dataset_producao_v2` INVALIDADO nessas 90
+  combinações — não regenerado ainda nesta tarefa.**
+  `src/pipeline/geracao.py`, `src/pipeline/config.py`.
+
+  **Diagnóstico (sessão anterior, não repetido aqui em detalhe):**
+  `geracao.py` passava `params["delta_t"]` diretamente como `janela` em
+  `gerar_cenario_normal` (linha que constrói a classe negativa) — mesmo
+  valor usado para `ElectionModel.delta_t` (Fase 2/desembolso da classe
+  positiva, papel legítimo, PLANO §5.1.2). Com `delta_t=0.0` (nível
+  legítimo do design fatorial, `Δt ∈ {0h, 2h, 24h}`), isso zerava
+  `Poisson(taxa*0)=0` e a classe negativa ficava com Fonte A/B vazias em
+  **100% das janelas** — combinado com a classe positiva concentrando
+  eventos em `t=0` sob o mesmo `delta_t=0.0` (comportamento correto do
+  lado positivo, não tocado por esta correção — `layer2_copula.gerar_fonte_b`,
+  caso `janela<=0`, já coberto por `test_janela_zero_retorna_fonte_a_sem_chamar_copula`
+  e `test_delta_t_zero_com_contrato_ativado_nao_produz_nan`), "possuir
+  alguma linha em Fonte A/B" virava separador perfeito entre positiva e
+  negativa nas 90 combinações `delta_t=0.0` — não sinal adversarial real.
+
+  **Correção:** nova constante `config.JANELA_TRAFEGO_FUNDO_QUANDO_DELTA_T_ZERO
+  = 24.0` (maior nível de `delta_t` já presente no design fatorial — reusa
+  uma magnitude já validada/gerada no v2, em vez de introduzir uma nova
+  ordem de grandeza sem lastro; suposição v0 sem calibração formal, mesma
+  categoria de `K_RESULTADO_ALVO`/`tau_kendall`) e função local
+  `geracao._janela_trafego_fundo(delta_t)`: retorna o próprio `delta_t`
+  quando `!= 0.0` (no-op, 180 das 270 combinações — comportamento
+  idêntico ao de antes), e `JANELA_TRAFEGO_FUNDO_QUANDO_DELTA_T_ZERO`
+  quando `== 0.0` (90 combinações). `ElectionModel.delta_t` continua
+  recebendo `params["delta_t"]` sem alteração — não afeta a Fase 2, Fonte
+  C, `resolver_desembolso`, `_amostrar_timestamps_desembolso`,
+  `aplicar_batching`, `copula.py` ou a máscara π, em nenhum caso.
+
+  **Verificado empiricamente, não só argumentado (5 seeds de topo, 30
+  janelas/seed = 150 janelas negativas):**
+  ```
+  ANTES do fix (delta_t=0.0 reusado direto): 150/150 janelas negativas
+    vazias em fonte_a/fonte_b = 100.00%
+  DEPOIS do fix (janela_trafego_fundo=24.0):   0/150 janelas negativas
+    vazias em fonte_a/fonte_b =   0.00%
+
+  Heurístico "possui linha em fonte_a OU fonte_b => prevê positiva"
+  (150 positivas + 150 negativas, mesmas seeds):
+    ANTES:  acurácia = 100.00% (separador perfeito de classe)
+    DEPOIS: acurácia =  50.00% (equivalente a chute aleatório)
+  ```
+  Testes novos em `tests/test_pipeline_geracao.py`:
+  `test_janela_trafego_fundo_identica_a_delta_t_quando_delta_t_nao_zero`
+  (não-regressão, `delta_t ∈ {2.0, 24.0}`),
+  `test_janela_trafego_fundo_usa_constante_quando_delta_t_zero`,
+  `test_delta_t_zero_deixa_de_zerar_fonte_a_b_da_classe_negativa` e
+  `test_delta_t_zero_possuir_linha_deixa_de_ser_separador_perfeito_de_classe`
+  (os dois últimos estatísticos, 5 seeds, não uma seed isolada). Suíte
+  completa (148 testes, 143 anteriores + 5 novos) passa sem modificar
+  nenhum teste existente — incluindo `test_janela_zero_retorna_fonte_a_sem_chamar_copula`
+  (`test_layer2_copula.py`) e `test_delta_t_zero_com_contrato_ativado_nao_produz_nan`
+  (`test_adversarial_mode.py`), confirmados nominalmente sem alteração.
+
+  **Docstrings corrigidas:** `normal_mode/cenario.py::gerar_cenario_normal`
+  (parâmetro `janela`) não descreve mais `janela` como "tipicamente o
+  próprio `delta_t` do cenário" — passou a explicar a distinção conceitual
+  e apontar para `_janela_trafego_fundo`/a constante nova.
+
+  **Pendência explícita, não resolvida nesta tarefa:** as 90 combinações
+  `delta_t=0.0` de `output/dataset_producao_v2/` foram geradas com o
+  código ANTIGO (reuso direto) — continuam no disco com Fonte A/B da
+  classe negativa 100% vazias, INVALIDADAS para uso em detecção. As
+  outras 180 combinações (`delta_t ∈ {2.0, 24.0}`) não são afetadas por
+  esta correção (comportamento idêntico, não-regressão verificada). **O
+  dataset não foi regenerado nesta tarefa** — regenerar ao menos as 90
+  combinações `delta_t=0.0` (ou o grid completo, a decidir) fica como
+  próximo passo explícito antes de qualquer uso do v2 em feature
+  engineering/Semana 9-10 que dependa de `delta_t=0.0`.
+
 ## Estilo
 - Código Python com type hints
 - Docstrings estilo NumPy

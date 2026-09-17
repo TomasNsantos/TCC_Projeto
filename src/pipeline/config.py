@@ -49,6 +49,44 @@ essa fórmula, consistente com o resto do módulo (mesmo padrão de
 `resultado_alvo`/`threshold_range` já documentado como fora do escopo de
 `GradeFatorial`/`ParametrosPopulacionaisStub`)."""
 
+JANELA_TRAFEGO_FUNDO_QUANDO_DELTA_T_ZERO: float = 24.0
+"""Janela de observação (`janela`) usada por
+`src.pipeline.geracao.gerar_par_de_classes_real` ao chamar
+`gerar_cenario_normal`/`gerar_fonte_a_normal`/`gerar_fonte_b_normal` da
+classe negativa, especificamente quando ``delta_t == 0.0``.
+
+**Achado que motivou esta constante:** antes desta tarefa, `geracao.py`
+reusava `params["delta_t"]` diretamente como `janela` do tráfego de fundo
+(Fonte A/B) — acoplamento sem justificativa de escopo, já que `delta_t`
+(PLANO §5.1.2, "atraso de divulgação") e a janela de observação do tráfego
+de fundo independente (outros contratos legítimos, sem relação com a
+eleição sendo simulada — ver docstring de `normal_mode/trafego.py`) são
+conceitos distintos. Com `delta_t=0.0` (nível legítimo do design fatorial,
+`Δt ∈ {0h, 2h, 24h}`), isso zerava `Poisson(taxa * 0) = 0` e a classe
+negativa ficava com Fonte A/B vazias em 100% das janelas — combinado com a
+classe positiva concentrando eventos em `t=0` sob o mesmo `delta_t=0.0`
+(comportamento correto do lado positivo, não tocado por esta mudança, ver
+`layer2_copula/copula.py::gerar_fonte_b`, caso `janela<=0`), a mera
+presença de linhas em Fonte A/B virava um separador trivial de classe nas
+90 combinações com `delta_t=0.0` do design fatorial — não um sinal
+adversarial real. Ver CLAUDE.md para o diagnóstico completo.
+
+**Por que 24.0 e não outro valor:** é o maior nível de `delta_t` já
+presente no design fatorial (`Δt ∈ {0h, 2h, 24h}`, PLANO §5.2.2) — reusa
+uma magnitude já validada/gerada no dataset (a janela de 24h já produz
+tráfego de fundo com contagem de eventos não-degenerada, ver os arquivos
+`delta_t-24.0000` do dataset de produção v2) em vez de introduzir uma nova
+ordem de grandeza sem lastro. Suposição v0 sem calibração formal — mesma
+categoria de pendência de `K_RESULTADO_ALVO`/`tau_kendall`/`taxa_fonte_a`.
+
+**Escopo — só a classe negativa, só `delta_t=0.0`:** para
+`delta_t ∈ {2.0, 24.0}` (180 das 270 combinações do dataset v2), a janela
+de tráfego de fundo continua sendo exatamente `delta_t` — comportamento
+idêntico ao de antes desta tarefa, sem regressão. A classe positiva (Fase
+2/desembolso, `ElectionModel.delta_t`, `_amostrar_timestamps_desembolso`,
+`aplicar_batching`, `layer2_copula.gerar_fonte_b`) não é afetada em
+nenhum caso — usa `params["delta_t"]` diretamente, sem alteração."""
+
 _N_SECOES_DEFAULT: int = 5
 """Default de ``ParametrosPopulacionaisStub.n_secoes`` — extraído como
 constante de módulo (não só um literal no default do campo) porque também

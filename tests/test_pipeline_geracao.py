@@ -407,3 +407,140 @@ def test_candidato_alvo_none_positiva_e_negativa_sorteiam_independentemente(
         "candidato_alvo sorteado foi identico entre positiva e negativa em TODAS as janelas -- "
         "sinal de acoplamento indevido entre as duas classes (deveriam ser independentes)"
     )
+
+
+# ---------------------------------------------------------------------------
+# Testes de _janela_trafego_fundo -- corrige o acoplamento delta_t=0.0 =>
+# Fonte A/B da classe negativa vazias em 100% das janelas (ver
+# config.JANELA_TRAFEGO_FUNDO_QUANDO_DELTA_T_ZERO e CLAUDE.md).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("delta_t", [2.0, 24.0])
+def test_janela_trafego_fundo_identica_a_delta_t_quando_delta_t_nao_zero(delta_t: float) -> None:
+    """Não-regressão: para delta_t != 0.0 (180 das 270 combinações do
+    design fatorial), a janela de tráfego de fundo deve continuar sendo
+    exatamente delta_t -- comportamento idêntico ao de antes desta tarefa."""
+    from src.pipeline.geracao import _janela_trafego_fundo
+
+    assert _janela_trafego_fundo(delta_t) == delta_t
+
+
+def test_janela_trafego_fundo_usa_constante_quando_delta_t_zero() -> None:
+    """delta_t=0.0 (90 das 270 combinações) passa a usar
+    JANELA_TRAFEGO_FUNDO_QUANDO_DELTA_T_ZERO (24.0), não mais 0.0 direto."""
+    from src.pipeline.config import JANELA_TRAFEGO_FUNDO_QUANDO_DELTA_T_ZERO
+    from src.pipeline.geracao import _janela_trafego_fundo
+
+    assert JANELA_TRAFEGO_FUNDO_QUANDO_DELTA_T_ZERO == 24.0
+    assert _janela_trafego_fundo(0.0) == JANELA_TRAFEGO_FUNDO_QUANDO_DELTA_T_ZERO
+
+
+# Params base para os testes estatísticos abaixo: mesma família de
+# _PARAMS_ATIVA_CONTRATO (recompensa alta o bastante para a classe positiva
+# ativar o contrato na maioria das janelas), delta_t=0.0 -- o caso central
+# do diagnóstico.
+_PARAMS_DELTA_T_ZERO = {**_PARAMS_ATIVA_CONTRATO, "delta_t": 0.0}
+
+# Múltiplas seeds de topo, não uma só -- evita teste flaky dependente de uma
+# única realização do processo de Poisson (mesmo raciocínio já usado em
+# test_normal_mode.py::test_independencia_fonte_a_e_fonte_b_normal, que usa
+# 50 seeds). n_janelas por seed é moderado (30) para manter o teste rápido;
+# o total agregado (5 seeds x 30 janelas = 150 janelas por classe) já é
+# suficiente para medir uma fração de forma estável.
+_SEEDS_TOPO_TESTE_ESTATISTICO = [1, 2, 3, 4, 5]
+_N_JANELAS_POR_SEED_TESTE_ESTATISTICO = 30
+
+
+def _fracao_janelas_vazias_e_acuracia_heuristico(
+    populacionais: ParametrosPopulacionaisStub, stub_geracao: ParametrosStubGeracao, params: dict, tmp_path: Path
+) -> tuple[float, float]:
+    """Roda múltiplas seeds com `params` (delta_t=0.0) e retorna:
+    (1) a fração de janelas da classe NEGATIVA sem nenhuma linha em
+        fonte_a/fonte_b (proxy de n_eventos=0 -- a tabela simplesmente não
+        tem linha para essa janela quando não há evento, ver storage.py);
+    (2) a acurácia do heurístico "possui linha em fonte_a OU fonte_b =>
+        prevê classe positiva" sobre o conjunto positiva+negativa (medida
+        de separabilidade trivial de classe)."""
+    n_negativas_vazias = 0
+    n_negativas_total = 0
+    acertos = 0
+    total_janelas = 0
+
+    for seed in _SEEDS_TOPO_TESTE_ESTATISTICO:
+        resultado = gerar_par_de_classes_real(
+            params,
+            seed=seed,
+            n_janelas=_N_JANELAS_POR_SEED_TESTE_ESTATISTICO,
+            populacionais=populacionais,
+            stub_geracao=stub_geracao,
+            diretorio_output=tmp_path / f"seed{seed}",
+        )
+        caminho = resultado["caminho_output"]
+        fonte_a = pd.read_hdf(caminho, "fonte_a")
+        fonte_b = pd.read_hdf(caminho, "fonte_b")
+
+        janelas_com_linha = set(zip(fonte_a["classe"], fonte_a["window_id"])) | set(
+            zip(fonte_b["classe"], fonte_b["window_id"])
+        )
+
+        for classe, n in (("negativa", _N_JANELAS_POR_SEED_TESTE_ESTATISTICO), ("positiva", _N_JANELAS_POR_SEED_TESTE_ESTATISTICO)):
+            for window_id in range(n):
+                possui_linha = (classe, window_id) in janelas_com_linha
+                if classe == "negativa":
+                    n_negativas_total += 1
+                    if not possui_linha:
+                        n_negativas_vazias += 1
+                previsao_positiva = possui_linha
+                acertou = (previsao_positiva and classe == "positiva") or (not previsao_positiva and classe == "negativa")
+                acertos += int(acertou)
+                total_janelas += 1
+
+    fracao_negativas_vazias = n_negativas_vazias / n_negativas_total
+    acuracia_heuristico = acertos / total_janelas
+    return fracao_negativas_vazias, acuracia_heuristico
+
+
+def test_delta_t_zero_deixa_de_zerar_fonte_a_b_da_classe_negativa(
+    populacionais: ParametrosPopulacionaisStub, stub_geracao: ParametrosStubGeracao, tmp_path
+) -> None:
+    """Teste estatístico (5 seeds, 30 janelas/seed = 150 janelas negativas
+    no total) -- confirma que, APÓS o fix, a fração de janelas negativas
+    sem nenhuma linha em fonte_a/fonte_b deixa de ser 100% (o achado do
+    diagnóstico) e passa a ser consistente com uma janela de observação de
+    24.0 (mesma ordem de grandeza já observada nas combinações delta_t=24.0
+    do dataset de produção v2, que não têm 100% das janelas vazias)."""
+    fracao_vazias, _ = _fracao_janelas_vazias_e_acuracia_heuristico(
+        populacionais, stub_geracao, _PARAMS_DELTA_T_ZERO, tmp_path
+    )
+
+    assert fracao_vazias < 1.0, (
+        f"fração de janelas negativas vazias = {fracao_vazias:.4f} -- esperado < 1.0 após o fix "
+        "(antes do fix, era exatamente 1.0 em 100% dos casos com delta_t=0.0)"
+    )
+    # não deveria ficar degenerada no sentido oposto (quase tudo vazio ainda) --
+    # com taxa_fonte_a/taxa_fonte_b=1.0 (stub_geracao da fixture) e janela=24.0,
+    # a maioria das janelas deveria ter pelo menos um evento.
+    assert fracao_vazias < 0.5, (
+        f"fração de janelas negativas vazias = {fracao_vazias:.4f} -- ainda alta demais, "
+        "esperava-se tráfego de fundo não-degenerado com janela=24.0"
+    )
+
+
+def test_delta_t_zero_possuir_linha_deixa_de_ser_separador_perfeito_de_classe(
+    populacionais: ParametrosPopulacionaisStub, stub_geracao: ParametrosStubGeracao, tmp_path
+) -> None:
+    """Teste cruzado de classe (5 seeds, 150 janelas positivas + 150
+    negativas) -- confirma que o heurístico "possui linha em fonte_a OU
+    fonte_b => prevê positiva" deixa de ter acurácia perfeita (1.0) em
+    delta_t=0.0 após o fix. Não é um classificador de verdade, só a
+    proporção de acerto desse heurístico simples, medindo diretamente a
+    separabilidade trivial de classe identificada no diagnóstico."""
+    _, acuracia = _fracao_janelas_vazias_e_acuracia_heuristico(
+        populacionais, stub_geracao, _PARAMS_DELTA_T_ZERO, tmp_path
+    )
+
+    assert acuracia < 1.0, (
+        f"acurácia do heurístico 'possui linha em A/B' = {acuracia:.4f} -- esperado < 1.0 após o fix "
+        "(antes do fix, era exatamente 1.0 -- separador perfeito de classe em delta_t=0.0)"
+    )
