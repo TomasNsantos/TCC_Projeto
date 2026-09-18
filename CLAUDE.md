@@ -1123,8 +1123,12 @@ via Mesa), Camada 2 (estrutura de dependência via cópula Clayton, biblioteca
   tráfego de fundo (Fonte A/B, classe negativa), zerando `Poisson(taxa*0)`
   e criando separador trivial de classe nas 90 combinações `delta_t=0.0`
   do dataset de produção v2. `dataset_producao_v2` INVALIDADO nessas 90
-  combinações — não regenerado ainda nesta tarefa.**
-  `src/pipeline/geracao.py`, `src/pipeline/config.py`.
+  combinações — CORRIGIDO no dataset de produção v3, gerado e validado
+  (2026-09-17): `output/dataset_producao_v3/` (270/270 arquivos,
+  `manifesto_producao_v3.db`/`mlflow_producao_v3.db` consolidados) é a
+  versão atual a usar para feature engineering/Semana 9-10, não o v2.**
+  `src/pipeline/geracao.py`, `src/pipeline/config.py`,
+  `scripts/gerar_dataset_producao_v3.py`.
 
   **Diagnóstico (sessão anterior, não repetido aqui em detalhe):**
   `geracao.py` passava `params["delta_t"]` diretamente como `janela` em
@@ -1184,16 +1188,68 @@ via Mesa), Camada 2 (estrutura de dependência via cópula Clayton, biblioteca
   próprio `delta_t` do cenário" — passou a explicar a distinção conceitual
   e apontar para `_janela_trafego_fundo`/a constante nova.
 
-  **Pendência explícita, não resolvida nesta tarefa:** as 90 combinações
-  `delta_t=0.0` de `output/dataset_producao_v2/` foram geradas com o
-  código ANTIGO (reuso direto) — continuam no disco com Fonte A/B da
-  classe negativa 100% vazias, INVALIDADAS para uso em detecção. As
-  outras 180 combinações (`delta_t ∈ {2.0, 24.0}`) não são afetadas por
-  esta correção (comportamento idêntico, não-regressão verificada). **O
-  dataset não foi regenerado nesta tarefa** — regenerar ao menos as 90
-  combinações `delta_t=0.0` (ou o grid completo, a decidir) fica como
-  próximo passo explícito antes de qualquer uso do v2 em feature
-  engineering/Semana 9-10 que dependa de `delta_t=0.0`.
+  **Dataset de produção v3 — gerado e validado (2026-09-17), substitui o
+  v2 para qualquer uso a partir de agora.** `output/dataset_producao_v3/`
+  (270/270 arquivos): as 180 combinações `delta_t ∈ {2.0, 24.0}` foram
+  COPIADAS sem alteração de `output/dataset_producao_v2/` (não
+  regeneradas — desnecessário, já que a não-regressão foi confirmada
+  empiricamente antes da cópia: uma combinação amostrada, regenerada com
+  o código pós-fix e comparada célula-a-célula (`pd.testing.assert_frame_equal`)
+  contra o arquivo original do v2, resultou nas 6 tabelas idênticas). As
+  90 combinações `delta_t=0.0` foram geradas do zero com o código
+  corrigido, via `scripts/gerar_dataset_producao_v3.py`, mesmas seeds
+  `[1, 2]` do v2. `output/dataset_producao_v2/` permanece intacto em
+  disco (não deletado, não sobrescrito) — mantido só como registro
+  histórico do estado pré-fix, não deve mais ser usado para feature
+  engineering/Semana 9-10.
+
+  **Checklist de validação nas 90 combinações novas — todos passaram:**
+  manifesto vs. disco (90/90 `success`, 90 arquivos em disco, todos
+  presentes); schema/NaN (0 falhas de schema em 8 colunas, 0 NaN em
+  667.035 linhas de fonte_a e 22.052.955 linhas de fonte_b); `candidato_alvo`
+  variando (5 valores distintos por seed, ex. seed=1:
+  `{0:211, 1:197, 2:212, 3:181, 4:199}`); taxa de ativação por recompensa
+  (`0.5`→9,55%, `1.0`→100%, `1.5`→100% — idêntico ao padrão já visto no
+  dataset completo, confirmando que Fonte C/`resolver_desembolso` não foi
+  afetado pelo fix, só o tráfego de fundo).
+
+  **Separabilidade de classe, medida diretamente nas mesmas 90
+  combinações, antes (v2) vs. depois (v3):**
+  ```
+  fração de janelas NEGATIVAS vazias em fonte_a/fonte_b (90.000 janelas):
+    ANTES (v2):  100,00% (90000/90000)
+    DEPOIS (v3):   0,00% (0/90000)
+
+  acurácia bruta do heurístico "possui linha em A/B => prevê positiva"
+  (90.000 positivas + 90.000 negativas):
+    ANTES (v2):  84,93%
+    DEPOIS (v3): 34,93%
+  ```
+  A queda da acurácia bruta não é piora — é um artefato de como esse
+  heurístico fixo foi formulado (com quase todas as negativas passando a
+  ter linha em A/B, "possui linha ⇒ positiva" vira essencialmente "sempre
+  prever positiva", que erra toda negativa). A métrica correta de
+  separabilidade trivial é a distância em relação ao acaso (classes
+  balanceadas 1:1, baseline 50%): **34,93 pontos percentuais de vantagem
+  sobre o acaso ANTES, caindo para 15,07pp DEPOIS** — redução real, mas
+  não elimina toda a separabilidade residual (a fração de 30,15% de
+  janelas positivas com contrato inativo, que também ficam sem linha em
+  A/B, é um resíduo estrutural já documentado acima — "Achado conceitual
+  central" — não afetado por esta correção, fora do escopo dela).
+
+  **`manifesto_producao_v3.db`/`mlflow_producao_v3.db` (dentro de
+  `output/dataset_producao_v3/`):** consolidados com 270/270 linhas/runs
+  `status=success` (180 copiadas do manifesto/MLflow do v2 com
+  `caminho_output` ajustado para `dataset_producao_v3/`, mesmo formato de
+  `registrar_run_mlflow`, + 90 novas desta geração).
+
+  **Nada mais pendente para destravar o uso do dataset em feature
+  engineering/Semana 9-10** no que diz respeito a este bug específico —
+  `output/dataset_producao_v3/` é a versão corrigida e validada. As
+  demais pendências já registradas neste arquivo (placeholders de
+  `taxa_fonte_a`/`volume_medio_fonte_a`/`taxa_fonte_b`, `g="pool"` fixo,
+  2 seeds em vez de 5, resíduo de separabilidade de 15,07pp acima do
+  acaso) continuam de pé, não resolvidas por esta correção.
 
 ## Estilo
 - Código Python com type hints
