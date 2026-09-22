@@ -172,6 +172,29 @@ def test_bin_janelas_multiplas_janelas_nao_se_misturam() -> None:
     assert contagem_pos == 9
 
 
+def test_bin_janelas_window_id_duplicado_na_mesma_classe_levanta_erro() -> None:
+    """Achado real (execução do M1/CUSUM sobre o grid completo do v3 via
+    loader.carregar_diretorio): window_id NÃO é global, é reiniciado em 0
+    por classe em CADA arquivo -- concatenar vários arquivos antes de
+    chamar bin_janelas produz (classe, window_id) duplicado, que o merge
+    interno trata como chave não-única, produzindo um produto cartesiano
+    parcial (estourou memória tentando alocar um array de ~451M elementos
+    num caso real de 540.000 janelas). bin_janelas deve rejeitar essa
+    entrada explicitamente, não deixar o merge falhar silenciosamente
+    (memória) ou produzir dado incorreto em lotes menores."""
+    fonte_a = pd.DataFrame({"classe": pd.Series(dtype=object), "window_id": pd.Series(dtype=int), "timestep": pd.Series(dtype=int), "n_eventos": pd.Series(dtype=int)})
+    fonte_b = pd.DataFrame({"classe": pd.Series(dtype=object), "window_id": pd.Series(dtype=int), "timestamp": pd.Series(dtype=float)})
+    metadados_duplicado = _metadados_sinteticos(
+        [
+            {"classe": "negativa", "window_id": 0, "delta_t": 2.0, "split": "train"},
+            {"classe": "negativa", "window_id": 0, "delta_t": 24.0, "split": "train"},  # mesmo (classe, window_id), combinação diferente
+        ]
+    )
+
+    with pytest.raises(ValueError, match="duplicado"):
+        bin_janelas(fonte_a, fonte_b, metadados_duplicado)
+
+
 # ---------------------------------------------------------------------------
 # bin_janelas com dados reais do v3 (loader real, não sintético)
 # ---------------------------------------------------------------------------

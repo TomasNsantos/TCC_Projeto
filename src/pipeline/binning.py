@@ -212,6 +212,18 @@ def bin_janelas(
     if "delta_t" not in metadados_janela.columns:
         raise ValueError("metadados_janela precisa da coluna 'delta_t' (metadado de cenário do loader).")
 
+    duplicadas = metadados_janela.duplicated(subset=["classe", "window_id"], keep=False)
+    if duplicadas.any():
+        raise ValueError(
+            "metadados_janela contém (classe, window_id) duplicado — bin_janelas espera dados de um "
+            "único arquivo/combinação de parâmetros, não um diretório concatenado sem desambiguação "
+            "(window_id NÃO é global, é reiniciado em 0 por classe em CADA arquivo — ver "
+            "storage.escrever_run_hdf5 e loader.py). Concatenar vários arquivos via "
+            "loader.carregar_diretorio antes de chamar bin_janelas produz merges com chave não-única "
+            "e pode estourar memória silenciosamente ou gerar dado incorreto sem erro — processe cada "
+            "arquivo/combinação separadamente com bin_janelas."
+        )
+
     if metadados_janela.empty:
         return pd.DataFrame(
             columns=["classe", "window_id", "timestep", "contagem_a", "contagem_b", "timestep_estruturalmente_impossivel"]
