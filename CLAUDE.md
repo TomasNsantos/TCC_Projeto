@@ -1251,6 +1251,95 @@ via Mesa), Camada 2 (estrutura de dependência via cópula Clayton, biblioteca
   2 seeds em vez de 5, resíduo de separabilidade de 15,07pp acima do
   acaso) continuam de pé, não resolvidas por esta correção.
 
+## Peculiaridade — positiva_inativa e ausência total em Fonte A/B
+
+`positiva_inativa` é 100,0000% vazia em Fonte A e B em todo o v3
+(81.405/81.405 janelas, zero exceção), sem variação com π/Δt. Fonte C
+carrega o único sinal (resíduo ~0,37). Mecanismo já documentado (linhas
+988-1023): decorrência correta e esperada da ativação condicional do
+contrato (`cenario.py:149-159`, `model.py::resolver_desembolso()`) —
+quando `contrato_ativado=False`, `eventos_desembolso` fica vazio por
+construção, e Fonte B nem é chamada.
+
+**CONFIRMADO (verificação de 22/09):** a causa mecânica do determinismo
+é estrutural, não de calibração de valor — as classes positivas (ativa e
+inativa) NUNCA recebem tráfego de fundo independente
+(`gerar_fonte_a_normal`/`gerar_fonte_b_normal`), diferente da negativa.
+Fonte A/B nas positivas é composta EXCLUSIVAMENTE por eventos ligados ao
+CSC. Essa assimetria de arquitetura (negativa = ruído de fundo + eleição
+real; positiva = só eventos do contrato) existe no código mas nunca foi
+registrada como decisão avaliada e descartada — tem assinatura de
+simplificação não questionada, não de escolha deliberada. NÃO é a mesma
+pendência que `taxa_fonte_a`/`volume_medio_fonte_a` (essas são sobre
+valor de calibração; esta é sobre se deveria existir uma segunda camada
+de eventos nas classes positivas).
+
+**Decisão de M2 (22/09):** deixar o modelo aprender esse padrão como
+feature legítima (NaN nativo nas estatísticas contínuas de Fonte A/B,
+sem sentinela artificial nem supressão) — reflete o comportamento real
+de um ataque que nunca ultrapassou C_min, e um detector em produção
+veria a mesma ausência.
+
+**RESSALVA:** se a arquitetura do gerador for revista para incluir
+tráfego de fundo também nas classes positivas (endereço com atividade
+on-chain não relacionada ao ataque, cenário plausível), `positiva_inativa`
+deixaria de ser 100% determinística e qualquer métrica de M2 treinada
+sobre o padrão de nulidade atual precisaria ser revalidada. Registrar
+como novo item de pendência para avaliação com orientadores — categoria
+"arquitetura do gerador", não "calibração de valor".
+
+**Implicação de reporte:** métricas de M2 sempre quebradas por grupo
+(como M1 já faz) — F1 de `positiva_inativa` tende a saturar perto de 1,0
+por esse determinismo estrutural, e não deve ser lido como evidência de
+que a Camada 3 (coordenação) está funcionando bem.
+
+- **Camada agregada de features (Dia 4-5, 2026-09-24) — tempo real medido
+  no grid completo: 1689,6s (28,18min) para 270 arquivos / 540.000
+  janelas, MUITO acima da estimativa original de "poucos minutos
+  adicionais além do binning" feita no planejamento.**
+  `src/pipeline/features_agregadas.py`,
+  `scripts/features_agregadas_grid_completo.py`. Registrado aqui como
+  dado de calibração para estimativas futuras (M2/XGBoost sobre o mesmo
+  grid, por exemplo) — não extrapolar de `binning.py`/CUSUM (que são
+  vetorizados via `groupby` + operações em array) para módulos que somam
+  um loop Python adicional por janela, como este.
+
+  **Causa da discrepância com a estimativa, confirmada por profiling
+  (`cProfile`) num único arquivo:** o gargalo é overhead de `pandas`
+  por-janela (`groupby(...).groupby(...)` iterado com `sort_values`/`copy`/
+  `_consolidate_inplace` internos a cada grupo — ~6000 grupos por arquivo
+  de 2000 janelas), não o cálculo em si (`corrcoef`/`kendalltau` somam só
+  ~25% do tempo de `extrair_features_coordenacao`). Diferente de
+  `binning._bin_fonte_b_vetorizado`, que evita esse padrão chamando
+  `contagem_por_timestep` uma vez por GRUPO com evento via
+  `groupby(...).groupby(...)` só nos grupos não-vazios — os 4 blocos de
+  `features_agregadas.py` (`extrair_features_bloco_a/b`,
+  `extrair_features_coordenacao`, `extrair_features_bloco_c`) iteram por
+  TODAS as ~540.000 janelas via loop Python explícito dentro de
+  `groupby(...)`, vazias ou não. Medido isoladamente: ~6,2s/arquivo em
+  condições limpas (sem contenda de CPU), consistente e reproduzível em 4
+  execuções separadas do grid completo — não é degradação progressiva
+  nem vazamento de memória (confirmado processando os arquivos 30-61
+  isoladamente após a primeira execução "lenta", tempos idênticos aos
+  dos primeiros 30). **Não otimizado nesta etapa** — decisão explícita:
+  rodar como está (28min é aceitável para uma extração única, não
+  repetida) em vez de vetorizar os loops antes de fechar o Dia 4-5;
+  vetorizar seguindo o padrão de `_bin_fonte_b_vetorizado` fica como
+  otimização futura se o tempo se tornar bloqueante (ex. se o design
+  fatorial crescer, ou se a extração precisar rodar repetidamente).
+
+  **Achado à parte, não relacionado à performance:** a extração em si
+  nunca falhou nas 4 execuções do grid completo — todos os erros que
+  ocorreram durante esta etapa estavam nas checagens de consistência do
+  script de verificação (`scripts/features_agregadas_grid_completo.py`),
+  não em `features_agregadas.py`. Dois deles eram o mesmo padrão de bug
+  (merge por `(classe, window_id)`, chave não-única no dataset completo,
+  já documentado em `binning.py`/`cusum.py` — ver a entrada abaixo sobre
+  recorrência desse pitfall), corrigidos com junção posicional. Contagem
+  final da suíte após esta etapa: 244 testes (227 baseline + 17 do módulo
+  novo, incluindo o teste de regressão do caso `delta_t=0.0`/1 evento),
+  244/244 passando.
+
 ## Estilo
 - Código Python com type hints
 - Docstrings estilo NumPy
