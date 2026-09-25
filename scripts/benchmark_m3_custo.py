@@ -22,6 +22,23 @@ timesteps; `delta_t=24.0` → 24 timesteps. O design fatorial (`Δt ∈
 {0h, 2h, 24h}`) produz DOIS comprimentos de sequência distintos, não um
 único shape — este benchmark mede os dois separadamente.
 
+**Projeção ponderada, não duas linhas alternativas.** Δt é um dos 5
+eixos cruzados no fatorial principal (PLANO §5.2.2, linha 249:
+`4(π) x 3(g) x 3(Δt) x 3(λ) x 3(ρ) x 5(seeds) = 1.620`) — cada run
+pertence a EXATAMENTE UM dos dois shapes medidos, não aos dois
+simultaneamente. Corrigido após revisão: a primeira versão deste
+script reportava as duas linhas (24 e 2 timesteps) como se fossem
+cenários alternativos de melhor/pior caso, cada uma multiplicada pelos
+11.340 runs inteiros — superestimando (0,04h→1,09h, contando TODOS os
+runs como o shape mais caro) e subestimando (contando todos como o
+mais barato) ao mesmo tempo, sem produzir o número único acionável que
+a decisão de infraestrutura precisa. Fixando Δt e cruzando os outros 5
+eixos: `4x3x3x3x5=540` combinações por nível de Δt — 2 dos 3 níveis
+(0h, 24h) caem no shape de 24 timesteps (1.080 combinações), 1 dos 3
+(2h) cai no shape de 2 timesteps (540 combinações); a projeção final é
+a SOMA ponderada por essa contagem real (confirmada no PLANO, não
+assumida), não a soma nem a média das duas linhas medidas.
+
 Uso (a partir da raiz do projeto, para `import src....` resolver):
     python -m scripts.benchmark_m3_custo
 """
@@ -29,11 +46,20 @@ Uso (a partir da raiz do projeto, para `import src....` resolver):
 from __future__ import annotations
 
 import os
+import sys
 import time
 
 import psutil
 import torch
 from torch import nn
+
+if sys.stdout.encoding is not None and sys.stdout.encoding.lower() != "utf-8":
+    # Console Windows usa cp1252 por padrão -- não cobre Δ/λ/π/ρ (achado
+    # desta correção: a versão anterior deste script já usava esses
+    # símbolos em outras strings sem erro só porque nunca chegavam a ser
+    # impressas nessa combinação exata; forçar UTF-8 evita depender de
+    # sorte de encoding em prints futuros deste script).
+    sys.stdout.reconfigure(encoding="utf-8")
 
 N_CANAIS = 2
 """contagem_a, contagem_b -- as duas colunas de binning.bin_janelas."""
@@ -54,7 +80,34 @@ SHAPES_REAIS = {
     "delta_t=2.0 (2 timesteps)": 2,
 }
 
-N_RUNS_DESIGN_FATORIAL = 1_620 * 7
+N_COMBINACOES_FATORIAL = 1_620
+"""PLANO §5.2.2 (docs/PLANO TCC ARTIGO V4_2.md:249): design fatorial
+principal = 4(π) x 3(g) x 3(Δt) x 3(λ) x 3(ρ) x 5(seeds) = 1.620.
+Δt é um dos 3 eixos cruzados nesse produto -- logo, para CADA um dos 3
+níveis de Δt, o número de combinações é 1.620 / 3 = 540 (fixando Δt e
+cruzando os outros 5 eixos: 4x3x3x3x5=540), não uma fração arbitrária.
+Confirmado lendo o PLANO, não assumido."""
+
+N_NIVEIS_DELTA_T = 3
+"""Δt ∈ {0h, 2h, 24h} (PLANO §5.2.2, linha 194) -- 3 níveis, cada um
+com N_COMBINACOES_FATORIAL / N_NIVEIS_DELTA_T = 540 combinações."""
+
+N_COMBINACOES_POR_NIVEL_DELTA_T = N_COMBINACOES_FATORIAL // N_NIVEIS_DELTA_T
+"""540 combinações por nível de Δt -- ver N_COMBINACOES_FATORIAL acima."""
+
+FRACAO_RUNS_POR_SHAPE = {
+    "delta_t=0.0 ou 24.0 (24 timesteps)": 2 * N_COMBINACOES_POR_NIVEL_DELTA_T,  # Δt=0h + Δt=24h
+    "delta_t=2.0 (2 timesteps)": 1 * N_COMBINACOES_POR_NIVEL_DELTA_T,  # Δt=2h
+}
+"""Número de combinações do fatorial (antes de multiplicar por C1-C7)
+que caem em cada shape -- 2 dos 3 níveis de Δt (0h, 24h) produzem
+shape=24; 1 dos 3 níveis (2h) produz shape=2. Soma = 1.620, confere com
+N_COMBINACOES_FATORIAL."""
+
+N_COMBINACOES_ABLACAO = 7
+"""C1-C7, combinações de fonte na ablação (PLANO §5.3.2/§5.4.1)."""
+
+N_RUNS_DESIGN_FATORIAL = N_COMBINACOES_FATORIAL * N_COMBINACOES_ABLACAO
 """1.620 combinações x 7 combinações de fonte (C1-C7), PLANO §5.3.2."""
 
 N_CORES_LOGICOS = 4
@@ -173,21 +226,40 @@ def main() -> None:
     print("=" * 100)
     print("ETAPA 3 — PROJEÇÃO PARA O DESIGN FATORIAL COMPLETO")
     print("=" * 100)
-    print(f"N_RUNS_DESIGN_FATORIAL = 1.620 combinações x 7 (C1-C7) = {N_RUNS_DESIGN_FATORIAL}")
+    print(f"N_RUNS_DESIGN_FATORIAL = {N_COMBINACOES_FATORIAL} combinações x {N_COMBINACOES_ABLACAO} (C1-C7) = {N_RUNS_DESIGN_FATORIAL}")
     print()
-    print("AVISO OBRIGATÓRIO: a projeção abaixo é só o custo de UMA ÉPOCA por run, "
-          "multiplicado por 11.340 runs. O número real de épocas até convergência é "
-          "DESCONHECIDO nesta etapa — não foi assumido nem inventado. Para obter o tempo "
-          "total real, multiplique a projeção abaixo pelo número de épocas até convergência "
-          "(variável em aberto, decisão de quem definir a infraestrutura/arquitetura final de M3).")
+    print("AVISO OBRIGATÓRIO: a projeção abaixo é só o custo de UMA ÉPOCA por run. O número "
+          "real de épocas até convergência é DESCONHECIDO nesta etapa — não foi assumido nem "
+          "inventado. Para obter o tempo total real, multiplique o número final abaixo pelo "
+          "número de épocas até convergência (variável em aberto, decisão de quem definir a "
+          "infraestrutura/arquitetura final de M3).")
     print()
+
+    print("Δt é um dos 5 eixos cruzados no fatorial (PLANO §5.2.2: 4(π) x 3(g) x 3(Δt) x 3(λ) x "
+          f"3(ρ) x 5(seeds) = {N_COMBINACOES_FATORIAL}) — cada run pertence a EXATAMENTE UM dos "
+          "dois shapes medidos, não aos dois. As linhas abaixo não são cenários alternativos "
+          "(melhor/pior caso): são a partição real dos runs, ponderada pela contagem exata de "
+          "combinações por nível de Δt, não por uma fração assumida.")
+    print()
+
+    tempo_total_ponderado_segundos = 0.0
     for descricao, r in resultados.items():
-        tempo_total_1_epoca_segundos = r["tempo_segundos"] * N_RUNS_DESIGN_FATORIAL
+        n_combinacoes_fatorial_deste_shape = FRACAO_RUNS_POR_SHAPE[descricao]
+        n_runs_deste_shape = n_combinacoes_fatorial_deste_shape * N_COMBINACOES_ABLACAO
+        tempo_deste_shape_segundos = r["tempo_segundos"] * n_runs_deste_shape
+        tempo_total_ponderado_segundos += tempo_deste_shape_segundos
+
         print(f"-- {descricao} --")
-        print(f"  {r['tempo_segundos']:.4f}s/época x {N_RUNS_DESIGN_FATORIAL} runs (1 época cada) = "
-              f"{tempo_total_1_epoca_segundos:.1f}s ({tempo_total_1_epoca_segundos / 3600:.2f}h) "
-              "-- SÓ 1 época por run, não o custo total até convergência.")
+        print(f"  {n_combinacoes_fatorial_deste_shape}/{N_COMBINACOES_FATORIAL} combinações do fatorial "
+              f"x {N_COMBINACOES_ABLACAO} (C1-C7) = {n_runs_deste_shape} runs neste shape")
+        print(f"  {r['tempo_segundos']:.4f}s/época x {n_runs_deste_shape} runs = "
+              f"{tempo_deste_shape_segundos:.1f}s ({tempo_deste_shape_segundos / 3600:.3f}h)")
         print()
+
+    print(f"TOTAL PONDERADO (soma das duas partições, cobre os {N_RUNS_DESIGN_FATORIAL} runs uma única "
+          f"vez cada): {tempo_total_ponderado_segundos:.1f}s ({tempo_total_ponderado_segundos / 3600:.3f}h) "
+          "para 1 época em cada um dos 11.340 runs do design fatorial completo.")
+    print()
 
     print("Projeção de memória / paralelização (nos 4 cores lógicos desta máquina):")
     for descricao, r in resultados.items():
