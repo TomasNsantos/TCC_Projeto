@@ -1334,11 +1334,202 @@ que a Camada 3 (coordenação) está funcionando bem.
   script de verificação (`scripts/features_agregadas_grid_completo.py`),
   não em `features_agregadas.py`. Dois deles eram o mesmo padrão de bug
   (merge por `(classe, window_id)`, chave não-única no dataset completo,
-  já documentado em `binning.py`/`cusum.py` — ver a entrada abaixo sobre
+  já documentado em `binning.py`/`cusum.py` — ver a pendência abaixo sobre
   recorrência desse pitfall), corrigidos com junção posicional. Contagem
   final da suíte após esta etapa: 244 testes (227 baseline + 17 do módulo
   novo, incluindo o teste de regressão do caso `delta_t=0.0`/1 evento),
   244/244 passando.
+
+- **Pendência — helper de junção por `(classe, window_id)`.** Erro de
+  merge por chave não-global já ocorreu 3x no projeto (loader/binning,
+  cusum, e no script de verificação do Dia 4-5) — `window_id` reinicia
+  por classe em cada arquivo, então merge direto sobre múltiplos arquivos
+  concatenados produz produto cartesiano espúrio. Documentado em
+  docstrings de `binning.py`/`cusum.py`/`features_agregadas.py`, mas a
+  documentação passiva não preveniu a recorrência (só quem já leu o
+  docstring certo evita o erro; testes unitários com fixture de 1 arquivo
+  nunca exercitam o caso). Considerar função centralizada (ex.
+  `juntar_por_janela(df_a, df_b)`, com validação explícita de unicidade
+  de chave antes do merge) na primeira vez que um novo consumidor
+  precisar desse join — candidato natural: M2 (Dia 6), se precisar juntar
+  features/metadados ou equivalente. **Não precisou entrar no Dia 6**
+  (ver entrada abaixo): `features_agregadas_v3` já produz `features`/
+  `metadados` alinhados posicionalmente (mesmo índice, mesma ordem,
+  confirmado empiricamente antes de usar), sem merge adicional — pendência
+  continua em aberto para um consumidor futuro que precise de fato juntar
+  por essa chave.
+
+- **M2 — XGBoost+SHAP (Dia 6, 2026-09-25) — módulo implementado, treinado
+  no grid completo, achado central: Fonte C domina o sinal de detecção,
+  ameaçando o critério de sucesso falsificável do TCC (§5.4.5).**
+  `src/pipeline/m2_xgboost.py` (8 funções: `carregar_dataset_m2`,
+  `preparar_matriz_treino`, `treinar_xgboost`, `calcular_metricas_m2`,
+  `amostrar_para_shap`, `calcular_shap_values`, `ranking_importancia_shap`,
+  mais as constantes `_COLUNAS_EXCLUIDAS_FEATURES`/`_COLUNAS_CAMADA_1_CRUA`),
+  `scripts/rodar_m2_grid_completo.py`, `scripts/ablacao_c4_sem_fonte_c.py`,
+  `scripts/medir_tempo_m2_amostra.py`. Target binário `negativa=0`,
+  `{positiva_ativa, positiva_inativa}=1` (decisão do usuário, não
+  reaberta); split intra-cenário já existente (`train`/`val`/`test`,
+  70/15/15 por `window_id` dentro de cada arquivo) reaproveitado sem
+  merge adicional; `val` usado para early stopping (não é tuning);
+  métricas sempre estratificadas por `(delta_t, recompensa, pi) ×
+  subgrupo_positivo`, mesma estrutura de `cusum.calcular_metricas_m1`
+  (réplica exata: `grupo` nunca entra no `groupby` direto, pareamento
+  separado negativa×positiva_ativa e negativa×positiva_inativa), com
+  AUROC adicionada. SHAP via `TreeExplainer` sobre amostra estratificada
+  `grupo × pi × delta_t` (~18.000 linhas), reportando duas visões
+  (`"agregado"` e `"por_pi"`, emenda aprovada ao plano — PLANO §5.3.2
+  exige a quebra por π, o ranking agregado sozinho não atende).
+
+  **19 testes novos** (`tests/test_pipeline_m2_xgboost.py`), suíte
+  completa em **263/263 passando**, sem regressão em nenhum dos 3
+  commits desta etapa.
+
+  **Tempo real medido no grid completo, MUITO abaixo do teto de 1h do
+  gate do plano (decisão 5) e MUITO abaixo do padrão de discrepância já
+  visto no Dia 4-5 — achado oposto ao do Dia 4-5, registrado aqui por
+  simetria de calibração:** treino completo (378.000 linhas de treino +
+  81.000 de val) em **2,79s**, parando em **28 árvores** via early
+  stopping (bem antes do `n_estimators` default). SHAP em amostra de
+  18.000 linhas: **0,80s**. Projeção do Prompt 2 (amostra de 25.000
+  linhas, extrapolação linear) tinha estimado 25,5s — a medição real
+  bateu bem próximo dessa ordem de grandeza. **Contraste deliberado com
+  a entrada do Dia 4-5** (que rodou 5x mais devagar que o estimado, por
+  overhead de `groupby` Python não-vetorizado): XGBoost é biblioteca C++
+  compilada, hiperparâmetros default escalam de forma muito mais barata
+  que o padrão de loop Python por-janela dos módulos anteriores do
+  pipeline — não generalizar nenhuma das duas experiências para a outra
+  sem medir de novo.
+
+  **Achado principal — dominância de Fonte C no modelo completo (C7,
+  A+B+C):** `fonte_c_media` domina o ranking SHAP agregado (6,898890,
+  ~7x a segunda feature, `fonte_b_n_eventos_total` em 0,952816) — mesmo
+  padrão de dominância se repete de forma praticamente idêntica em todos
+  os 5 níveis de π (0,00 a 0,95) no ranking `"por_pi"`. **13 das 26
+  features em SHAP=0,000000, incluindo TODO o Bloco de coordenação**
+  (`tau_kendall_ab`, `lag_correlacao_cruzada_otimo`,
+  `correlacao_cruzada_maxima`) e a maior parte das estatísticas de IET
+  de Fonte A. F1/AUROC=1,000 para `positiva_ativa` em TODOS os níveis de
+  π, **sem nenhuma degradação mesmo em π=0,95** (mascaramento máximo de
+  Fonte A) — evidência independente do SHAP (via métricas, não só
+  importância) de que o modelo não está usando sinal de Fonte A de forma
+  detectável nesta configuração.
+
+  **Achado secundário — ablação pontual C4 (A+B, sem Fonte C), Prompt
+  3.5, não o estudo de ablação C1-C7 completo (esse continua em §5.4,
+  Semanas 14-17):** removida Fonte C, a dominância **migra**, não
+  desaparece — `fonte_b_n_eventos_total` passa a SHAP=10,260477 (ainda
+  mais dominante que `fonte_c_media` era), seguida de
+  `fonte_a_n_eventos_total` (2,003586). **O Bloco de coordenação
+  permanece em SHAP=0,000000 mesmo sem Fonte C disponível** — o modelo
+  não passa a usar coordenação só porque o atalho mais fácil (Fonte C)
+  foi removido; migra para o próximo atalho mais fácil (contagem bruta
+  de Fonte B). Métricas C4 vs. C7: idênticas em `delta_t=0,0` (ambas
+  1,000 em todos os π); a diferença aparece só em `delta_t=2,0`, com
+  precisão degradando conforme π aumenta (ex. `recompensa=0.5, π=0.95`:
+  precisão cai de 0,933 em C7 para 0,491 em C4) — **recall permanece
+  1,000 em todos os estratos onde há positivas em C4**, ou seja, toda a
+  degradação de C4 vs. C7 é via aumento de falsos positivos, não perda
+  de verdadeiros positivos.
+
+  **Causa raiz diagnosticada (investigação separada, mesma sessão) —
+  homogeneidade de apoio eleitoral orgânico entre candidatos, suposição
+  v0 já deliberada e testada, não uma lacuna nova.**
+  `model.py:259`: `candidatos_preferidos = self.rng.integers(0,
+  n_candidatos, size=n_agentes)` — voto de base uniforme, sem nenhum
+  peso/popularidade por candidato, em nenhum lugar do código (confirmado:
+  não é "implementado e desconectado" como `RobustezBeta`, é simplesmente
+  inexistente). Já documentado como suposição v0 deliberada
+  (`agent.py:39-45`, "categórica uniforme... sem preferência
+  ideológica/demográfica") e coberto por teste que a trata como
+  comportamento ESPERADO, não como pendência
+  (`tests/test_layer1_abm.py::test_n_candidatos_maior_que_um_conta_voto_de_base_sem_incentivo`,
+  valida `fonte_c_resultado_agregado() ≈ 1/n_candidatos` com
+  `abs=0.03`). **Verificado empiricamente no v3** (540.000 linhas):
+  `fonte_c_media` na classe negativa varia só entre `0,279953` e
+  `0,280450` — DUAS combinações de média possíveis em 90 combinações de
+  `(delta_t, pi, rho, seed)`, diferindo exclusivamente por `seed` (1 vs.
+  2), nunca por π/Δt/ρ/recompensa (esperado — negativa nunca lê esses
+  eixos). Diferença de média entre as duas seeds: `0,0005` — desprezível
+  frente ao desvio-padrão dentro-de-seed (~0,0205, ruído amostral
+  janela-a-janela do ABM, não heterogeneidade estrutural entre
+  cenários). `candidato_alvo` (sorteado independentemente por janela,
+  `geracao.py`) usa uma seed própria (`seed_candidato_alvo =
+  seed_modelo.spawn(1)[0]`, fora do `ElectionModel`), estatisticamente
+  independente do sorteio de `candidato_preferido` (dentro do
+  `ElectionModel`, via `self.rng`) — sem correlação possível por
+  construção entre qual candidato é alvo do CSC e sua popularidade de
+  base (que, de todo modo, hoje não existe).
+
+  **Caminho de mudança identificado, NÃO implementado — pendência de
+  gerador, mesma categoria de `taxa_fonte_a`/ρ/`g` fixo:** trocar
+  `model.py:259` de `rng.integers(0, n_candidatos, size=n_agentes)`
+  (uniforme) para `rng.choice(n_candidatos, size=n_agentes,
+  p=pesos_popularidade)`, com `pesos_popularidade` como novo parâmetro
+  do `ElectionModel` — ex. amostrado de uma Dirichlet por seed/cenário,
+  para que a classe negativa deixe de ser quase-determinística perto de
+  `1/n_candidatos` e passe a ter eleições organicamente apertadas em
+  alguns cenários, forçando o detector a precisar de A/B/coordenação
+  para diferenciar "candidato popular sem CSC" de "CSC ativo". Decisão
+  de parametrização (Dirichlet? outro mecanismo? qual variância entre
+  cenários?) não tomada — fica para decisão explícita com os
+  orientadores, mesma disciplina de pendências de calibração já
+  registradas neste arquivo.
+
+  **Pendências abertas desta etapa, nenhuma bloqueante para o
+  encerramento do Dia 6, registradas para retomada futura:**
+
+  a. **Etapa 8b original (excluir Camada 1 crua de A/B) — NÃO
+     executada, não por esquecimento.** Desenhada no plano original
+     antes do achado de dominância de Fonte C; o achado do Prompt 3.5
+     (remover Fonte C só desloca a dominância para
+     `fonte_b_n_eventos_total`, não resolve o problema — revela outro,
+     igualmente estrutural) torna a Etapa 8b como estava planejada
+     (só excluir contagem/volume bruto de A/B, mantendo Fonte C)
+     insuficiente para testar o problema real observado. Precisa ser
+     redesenhada considerando os dois achados juntos (Fonte C E
+     Camada 1 crua de A/B dominando em sequência, não isoladamente),
+     não simplesmente executada como o plano original previa.
+  b. **Heterogeneidade de apoio orgânico entre candidatos** — pendência
+     de gerador, caminho de implementação já mapeado acima, decisão de
+     parametrização em aberto.
+  c. **Lacunas do §5.3.1 não implementadas** (z-score agregado por
+     janela, entropia temporal, desvio de IET vs. Poisson, mutual
+     information ativação×resultado por `g`) — já registrada na entrada
+     do Dia 4-5, mantida sem alteração; nenhuma delas foi adicionada
+     nesta etapa.
+  d. **Ameaça ao critério de sucesso falsificável do TCC (§5.4.5) —
+     risco explícito para discussão com os orientadores, não conclusão
+     definitiva.** C3 (só Fonte C) parece já resolver o problema de
+     detecção quase inteiramente dentro de C7 (A+B+C) — contrariando a
+     premissa de que integração multimodal A+B+C é necessária para
+     detecção eficaz, premissa central que §5.4.5 formaliza como
+     critério de sucesso (C7 precisa superar significativamente
+     max(C1,C2,C3)). **Qualificação obrigatória, não descartável:** este
+     é um achado preliminar de uma prova de conceito — split
+     intra-cenário (ver nota metodológica abaixo), um único regime de
+     treino (hiperparâmetros default, sem tuning), um único conjunto de
+     seeds (2), e a causa raiz já identificada (homogeneidade de apoio
+     orgânico, pendência b acima) pode estar inflando artificialmente a
+     separabilidade via Fonte C sozinha. Não é evidência de que a
+     detecção multimodal é desnecessária em geral — é evidência de que,
+     NESTE dataset com ESTAS calibrações, o atalho estrutural existe e o
+     XGBoost o encontra. Precisa constar como risco explícito antes do
+     design fatorial completo (§5.4, Semanas 14-17), não deve ser
+     silenciado nem resolvido unilateralmente aqui.
+
+  **Nota metodológica reafirmada (herdada do plano original, decisão 4)
+  — essencial para não ler os números acima de forma otimista demais:**
+  o split usado em todas as métricas desta etapa é **intra-cenário**
+  (`train`/`val`/`test` da MESMA combinação de parâmetros, por `window_id`
+  dentro de cada arquivo — `storage.calcular_split`). F1/AUROC=1,000
+  significa "o modelo reconhece o padrão dentro de um regime paramétrico
+  já visto no treino", não "o modelo generaliza para regimes nunca
+  vistos" — essa segunda pergunta só é respondida pelo design fatorial
+  completo (§5.4, Semanas 14-17), fora do escopo desta etapa. Os achados
+  de dominância (Fonte C, depois Camada 1 crua de A/B) são igualmente
+  sujeitos a essa ressalva: não se sabe ainda se a dominância se mantém
+  sob um split intercenário.
 
 ## Estilo
 - Código Python com type hints
