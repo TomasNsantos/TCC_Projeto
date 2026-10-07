@@ -145,7 +145,7 @@ precisam resolver antes), não um bloqueio de decisão externa — por isso
 mantido como `[AUTOSSUFICIENTE]`.
 
 Relacionado: Sanity Check 3 (§5.2.3, degradação monotônica do F1
-conforme β aumenta) continua não testável sem essa conexão — ver item 12.
+conforme β aumenta) continua não testável sem essa conexão — ver item 11.
 
 **10. Divergências texto (PLANO) vs. código real — correções de texto.**
   - Split não é temporal — é um corte determinístico por índice de
@@ -181,9 +181,8 @@ não bloqueia nada do que está em andamento.
 ## Fora de escopo (registro de que não foi esquecido, não pendência desta etapa)
 
 **13. McNemar / C_min.** Fora de escopo até o design fatorial completo
-(§5.4, Semanas 14-17) — decisão desta sessão de revisar o planejamento
-original (que incluía McNemar na consolidação do Dia 8). Não tratado
-nem no Dia 6, nem no Dia 7, nem nesta lista.
+(§5.4, Semanas 14-17). Não tratado nem no Dia 6, nem no Dia 7, nem
+nesta lista.
 
 ---
 

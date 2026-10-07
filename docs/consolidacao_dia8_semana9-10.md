@@ -3,9 +3,8 @@
 **Escopo:** Dias 3 (M1/CUSUM), 6 (M2/XGBoost+SHAP) e 7 (benchmark de
 custo M3). Material factual para discussão com os orientadores — **não**
 é a lista fechada de pendências nem o texto de §5.3 (Dia 9). Sem
-McNemar (§5.4.5) nesta etapa — decisão desta sessão de revisar o
-planejamento original, que incluía McNemar aqui; fica para o design
-fatorial completo (§5.4, Semanas 14-17).
+McNemar (§5.4.5) nesta etapa — fora de escopo até o design fatorial
+completo (§5.4, Semanas 14-17).
 
 ---
 
@@ -55,7 +54,7 @@ documentado no Dia 6).
 Tempo de reexecução: 475,5s (7,93min) para o grid completo — dentro da
 faixa já observada para M1.
 
-### 1.2 M2 (XGBoost) — reaproveitado do Dia 6 (Prompts 3 e 3.5 desta mesma sessão), sem reexecução
+### 1.2 M2 (XGBoost) — reaproveitado do Dia 6 (sessão anterior), sem reexecução
 
 **`Δt=0.0`: F1/AUROC/precisão/recall = 1,000 em TODOS os 5 níveis de
 π, para os dois modelos (C7 completo e C4 sem Fonte C).** Nenhuma
@@ -122,7 +121,7 @@ seguida de `fonte_a_n_eventos_total` (2,003586) — ambas features de
 Camada 1 (contagem bruta), não de coordenação. O Bloco de coordenação
 permanece em SHAP=0,000000 mesmo sem Fonte C disponível.
 
-A causa raiz foi diagnosticada em investigação separada nesta sessão:
+A causa raiz foi diagnosticada em investigação separada no Dia 6:
 `model.py:259` sorteia o voto de base de cada agente de forma
 **uniforme e independente** entre candidatos (`rng.integers(0,
 n_candidatos, ...)`), sem nenhum parâmetro de popularidade diferencial
@@ -193,7 +192,7 @@ ser considerada final (Dia 7).** O benchmark
 (`scripts/benchmark_m3_custo.py`) mostrou variação de ~3,4x no tempo
 de uma época entre duas execuções do mesmo shape, atribuída a contenda
 de CPU do sistema, não a bug de fórmula (diagnosticado e confirmado
-nesta sessão). A projeção atual (~0,227h a ~0,738h para 1 época em
+no Dia 7). A projeção atual (~0,227h a ~0,738h para 1 época em
 todo o design fatorial, dependendo de qual execução se usa como
 referência) precisa de 5-10 repetições por shape, reportando
 mediana + faixa, antes de ser levada como número final ao orientador
@@ -202,8 +201,8 @@ acima) pode alterar o shape/volume de dados que M3 consumiria,
 tornando a projeção atual sujeita a revisão por esse motivo também.
 Não corrigido nesta etapa — só registrado.
 
-**g. McNemar / C_min — fora de escopo até Semanas 14-17 (§5.4).** Não
-tratados nesta consolidação nem no Dia 6/7, por decisão desta sessão.
+**g. McNemar / C_min — fora de escopo até o design fatorial completo
+(§5.4, Semanas 14-17).** Não tratados nesta consolidação nem no Dia 6/7.
 
 ---
 

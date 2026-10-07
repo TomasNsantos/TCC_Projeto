@@ -1531,6 +1531,46 @@ que a Camada 3 (coordenação) está funcionando bem.
   sujeitos a essa ressalva: não se sabe ainda se a dominância se mantém
   sob um split intercenário.
 
+- **Registro de 2026-10-07 — benchmark de custo de M3, consolidação e
+  lista fechada de pendências (Dias 7-9).** `scripts/benchmark_m3_custo.py`
+  mediu tempo/memória de uma época de LSTM Autoencoder de brinquede nos
+  dois shapes reais de `binning.bin_janelas` (24 timesteps para
+  Δt∈{0,24}; 2 timesteps para Δt=2) — projeção ponderada corrigida
+  (commit `367a82d`) na faixa de ~0,23h a ~0,74h/época no design
+  fatorial completo (11.340 runs), com variação de ~3,4x observada
+  entre execuções por contenda de CPU (não bug de fórmula) —
+  pendência de repetição controlada (5-10 execuções/shape, mediana +
+  faixa) antes de número final, registrada.
+
+  `docs/consolidacao_dia8_semana9-10.md` reexecutou M1 sobre o v3
+  (determinístico) e confirmou que `Δt=0.0` e `Δt=24.0` produzem
+  métricas IDÊNTICAS em M1 e M2, célula a célula (mesmo teto de janela
+  de `binning._janela_teto`) — o bug de `Δt=0` pré-fix (separador
+  trivial de classe) não reaparece pós-fix, com a ressalva de que os
+  dados não distinguem "o fix funcionou" de "os dois níveis são
+  indistinguíveis por construção do gerador".
+
+  `docs/pendencias_fechadas_dia9_semana9-10.md` fecha a Semana 9-10 com
+  12 pendências categorizadas (`[SÓ ORIENTADOR]`/`[AUTOSSUFICIENTE]`/
+  `[BAIXA PRIORIDADE]`) mais o registro de McNemar/C_min como fora de
+  escopo até o design fatorial completo, incluindo 4 verificações
+  factuais feitas nesta etapa: seeds reais no v3 = 2 (PLANO linha 250
+  diz 5); π reais no v3 = 5 níveis incluindo 0,00 (PLANO linha 192
+  lista só 4); `RobustezBeta`/`expandir_grade_robustez` continuam
+  desconectados do runner; e a assimetria de tráfego de fundo entre
+  classes confirmada com as linhas exatas (`geracao.py:304-309`
+  positiva via CSC só, `geracao.py:352-361` negativa com Poisson de
+  fundo) — somada à heterogeneidade de apoio orgânico já diagnosticada
+  no Dia 6, como SEGUNDO confundidor possível empilhado no risco ao
+  critério de sucesso falsificável (§5.4.5).
+
+  Redação de §5.3 adiada até os itens `[SÓ ORIENTADOR]` da lista
+  fechada serem resolvidos com os orientadores.
+
+  **Prazos (registrados para referência, não decisão desta etapa):**
+  abstract IEEE em 10/11, TCC entregue à banca em 15/11, paper IEEE em
+  17/11 (mesmo texto do TCC), defesa até 30/11.
+
 ## Estilo
 - Código Python com type hints
 - Docstrings estilo NumPy
